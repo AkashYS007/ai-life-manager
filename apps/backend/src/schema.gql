@@ -1,0 +1,1130 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+input ActOnRecommendationInput {
+  dueDate: DateTime
+  durationMinutes: Int
+  priority: Int
+  startTime: DateTime
+}
+
+type ActOnRecommendationPayload {
+  bookedCalendarEventId: ID
+  createdTaskId: ID
+  errors: [UserError!]!
+  recommendationRun: AiRecommendationRun
+  startedFocusSessionId: ID
+}
+
+type AiConversation {
+  id: ID!
+  lastMessageAt: DateTime!
+  messages: [AiMessage!]!
+  startedAt: DateTime!
+  title: String
+}
+
+type AiMemoryFact {
+  confidence: Float!
+  content: String!
+  id: ID!
+  updatedAt: DateTime!
+}
+
+type AiMessage {
+  content: String!
+  createdAt: DateTime!
+  id: ID!
+  role: ChatMessageRole!
+}
+
+type AiPlanRun {
+  diff: PlanDiff!
+  generatedAt: DateTime!
+  id: ID!
+  modelUsed: String!
+  respondedAt: DateTime
+  scope: PlanScope!
+  status: PlanRunStatus!
+  triggerEvent: String!
+}
+
+type AiRecommendationRun {
+  date: DateTime!
+  generatedAt: DateTime!
+  id: ID!
+  modelUsed: String
+  recommendations: [Recommendation!]!
+}
+
+type AnalyticsSummary {
+  correlations: [MetricCorrelation!]!
+  dailyFocusMinutes: [DailyFocusMinutes!]!
+  dailyJournalActivity: [DailyJournalActivity!]!
+  dailyMoodEnergy: [DailyMoodEnergy!]!
+  dailySleep: [DailySleep!]!
+  dailyTaskCompletions: [DailyTaskCompletion!]!
+  focusSessionConsistency: FocusSessionConsistency!
+  habitStreaks: [HabitStreak!]!
+  routineConsistency: [RoutineConsistency!]!
+  windowDays: Int!
+}
+
+type BillingSubscription {
+  currentPeriodEnd: DateTime
+  hasStripeCustomer: Boolean!
+  status: SubscriptionStatus!
+  tier: SubscriptionTier!
+}
+
+type CalendarAccount {
+  createdAt: DateTime!
+  externalAccountEmail: String
+  id: ID!
+  lastSyncedAt: DateTime
+  provider: CalendarAccountProvider!
+  realtimeSyncEnabled: Boolean
+  status: CalendarAccountStatus!
+}
+
+enum CalendarAccountProvider {
+  APPLE
+  GOOGLE
+  MICROSOFT
+}
+
+enum CalendarAccountStatus {
+  ACTIVE
+  ERROR
+  REVOKED
+}
+
+type CalendarEvent {
+  createdAt: DateTime!
+  description: String
+  endTime: DateTime!
+  id: ID!
+  isAiFocusBlock: Boolean!
+  isImmovable: Boolean!
+  source: CalendarEventSource!
+  startTime: DateTime!
+  title: String!
+}
+
+type CalendarEventConnection {
+  edges: [CalendarEventEdge!]!
+  pageInfo: PageInfo!
+}
+
+type CalendarEventEdge {
+  cursor: String!
+  node: CalendarEvent!
+}
+
+enum CalendarEventSource {
+  APPLE
+  GOOGLE
+  MICROSOFT
+  NATIVE
+}
+
+type ChangeSubscriptionTierPayload {
+  errors: [UserError!]!
+  user: User
+}
+
+enum ChatMessageRole {
+  ASSISTANT
+  TOOL
+  USER
+}
+
+type ChatStreamChunk {
+  delta: String!
+  done: Boolean!
+  requestId: String!
+  role: ChatMessageRole!
+}
+
+enum Chronotype {
+  EARLY_BIRD
+  NEUTRAL
+  NIGHT_OWL
+}
+
+type CompleteHabitLogPayload {
+  errors: [UserError!]!
+  habit: Habit
+}
+
+input CompleteOnboardingInput {
+  chronotype: Chronotype
+  freeTextNotes: String
+  overloadSource: String
+  quietHoursEnd: String
+  quietHoursStart: String
+  workHoursEnd: String
+  workHoursStart: String
+}
+
+type CompleteOnboardingPayload {
+  errors: [UserError!]!
+  user: User
+}
+
+type CompleteTaskPayload {
+  errors: [UserError!]!
+  task: Task
+}
+
+input ConnectAppleCalendarInput {
+  appSpecificPassword: String!
+  appleId: String!
+}
+
+type ConnectAppleCalendarPayload {
+  account: CalendarAccount
+  errors: [UserError!]!
+}
+
+type CreateBillingPortalSessionPayload {
+  errors: [UserError!]!
+  portalUrl: String
+}
+
+input CreateCalendarEventInput {
+  description: String
+  endTime: DateTime!
+  isImmovable: Boolean
+  startTime: DateTime!
+  title: String!
+}
+
+type CreateCalendarEventPayload {
+  errors: [UserError!]!
+  event: CalendarEvent
+}
+
+type CreateCheckoutSessionPayload {
+  checkoutUrl: String
+  errors: [UserError!]!
+}
+
+input CreateGoalInput {
+  description: String
+  targetDate: DateTime
+  title: String!
+}
+
+type CreateGoalPayload {
+  errors: [UserError!]!
+  goal: Goal
+}
+
+input CreateHabitInput {
+  count: Int
+  dayOfMonth: Int
+  daysOfMonth: [Int!]
+  daysOfWeek: [Int!]
+  frequency: HabitFrequency!
+  goalId: ID
+  intervalDays: Int
+  intervalMonths: Int
+  intervalWeeks: Int
+  monthlyMode: MonthlyRecurrenceMode
+  monthlyOrdinal: Int
+  monthlyWeekday: Int
+  monthlyWeekdaySet: [Int!]
+  preferredTime: String
+  protectedDurationMinutes: Int
+  title: String!
+  until: String
+}
+
+type CreateHabitPayload {
+  errors: [UserError!]!
+  habit: Habit
+}
+
+input CreateJournalEntryInput {
+  content: String!
+}
+
+type CreateJournalEntryPayload {
+  entry: JournalEntry
+  errors: [UserError!]!
+}
+
+type CreateMemoryFactPayload {
+  errors: [UserError!]!
+  fact: AiMemoryFact
+}
+
+input CreateTagInput {
+  color: String
+  name: String!
+}
+
+type CreateTagPayload {
+  errors: [UserError!]!
+  tag: Tag
+}
+
+input CreateTaskInput {
+  description: String
+  dueDate: DateTime
+  estimatedDurationMinutes: Int
+  goalId: ID
+  parentTaskId: ID
+  priority: Int
+  tagIds: [ID!]
+  title: String!
+}
+
+type CreateTaskPayload {
+  errors: [UserError!]!
+  task: Task
+}
+
+type DailyFocusMinutes {
+  completedMinutes: Int!
+  completedSessions: Int!
+  date: String!
+}
+
+type DailyJournalActivity {
+  date: String!
+  entryCount: Int!
+}
+
+type DailyMoodEnergy {
+  averageEnergy: Float
+  averageMood: Float
+  date: String!
+}
+
+type DailyReflection {
+  aiSummary: String
+  answers: ReflectionAnswers!
+  createdAt: DateTime!
+  date: DateTime!
+  id: ID!
+  updatedAt: DateTime!
+}
+
+type DailySleep {
+  date: String!
+  durationMinutes: Int
+  qualityScore: Int
+}
+
+type DailyTaskCompletion {
+  completedCount: Int!
+  date: String!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type DeactivateHabitPayload {
+  errors: [UserError!]!
+  habit: Habit
+}
+
+type DeleteAccountPayload {
+  deleted: Boolean!
+  errors: [UserError!]!
+}
+
+type DeleteCalendarEventPayload {
+  deletedEventId: ID
+  errors: [UserError!]!
+}
+
+type DeleteJournalEntryPayload {
+  deletedEntryId: String
+  errors: [UserError!]!
+}
+
+type DeleteMemoryFactPayload {
+  deletedFactId: ID
+  errors: [UserError!]!
+}
+
+type DeleteRoutinePayload {
+  deleted: Boolean!
+  errors: [UserError!]!
+}
+
+type DisconnectCalendarAccountPayload {
+  disconnected: Boolean!
+  errors: [UserError!]!
+}
+
+type EndFocusSessionPayload {
+  errors: [UserError!]!
+  session: FocusSession
+}
+
+type EnergyEntry {
+  energyScore: Int!
+  id: ID!
+  loggedAt: DateTime!
+  source: EnergySource!
+}
+
+enum EnergySource {
+  INFERRED
+  MANUAL
+}
+
+type FocusSession {
+  endedAt: DateTime
+  id: ID!
+  kind: FocusSessionKind!
+  plannedDurationMinutes: Int!
+  startedAt: DateTime!
+  status: FocusSessionStatus!
+  taskId: ID
+  taskTitle: String
+}
+
+type FocusSessionConsistency {
+  completedDaysInWindow: Int!
+  completionRatePercent: Int!
+  currentStreak: Int!
+  daysInWindow: Int!
+}
+
+enum FocusSessionKind {
+  BREAK
+  WORK
+}
+
+enum FocusSessionStatus {
+  CANCELLED
+  COMPLETED
+  IN_PROGRESS
+}
+
+type Goal {
+  completedTaskCount: Int!
+  createdAt: DateTime!
+  description: String
+  id: ID!
+  linkedHabitCount: Int!
+  status: GoalStatus!
+  targetDate: DateTime
+  taskCount: Int!
+  title: String!
+}
+
+enum GoalStatus {
+  ABANDONED
+  ACTIVE
+  COMPLETED
+}
+
+type Habit {
+  active: Boolean!
+  count: Int
+  dayOfMonth: Int
+  daysOfMonth: [Int!]
+  daysOfWeek: [Int!]
+  frequency: HabitFrequency!
+  goal: Goal
+  id: ID!
+  intervalDays: Int
+  intervalMonths: Int
+  intervalWeeks: Int
+  monthlyMode: MonthlyRecurrenceMode
+  monthlyOrdinal: Int
+  monthlyWeekday: Int
+  monthlyWeekdaySet: [Int!]
+  preferredTime: String
+  protectedDurationMinutes: Int!
+  title: String!
+  todayCompleted: Boolean!
+  until: String
+}
+
+enum HabitFrequency {
+  DAILY
+  MONTHLY
+  WEEKLY
+}
+
+type HabitStreak {
+  completedDaysInWindow: Int!
+  completionRatePercent: Int!
+  currentStreak: Int!
+  dueDaysInWindow: Int!
+  habitId: ID!
+  title: String!
+}
+
+type JournalEntry {
+  content: String!
+  createdAt: DateTime!
+  id: ID!
+  sentimentScore: Float
+  updatedAt: DateTime!
+}
+
+type JournalEntryConnection {
+  edges: [JournalEntryEdge!]!
+  pageInfo: PageInfo!
+}
+
+type JournalEntryEdge {
+  cursor: String!
+  node: JournalEntry!
+}
+
+input LogEnergyInput {
+  energyScore: Int!
+}
+
+type LogEnergyPayload {
+  energyEntry: EnergyEntry
+  errors: [UserError!]!
+}
+
+input LogMoodInput {
+  moodScore: Int!
+  note: String
+}
+
+type LogMoodPayload {
+  errors: [UserError!]!
+  moodEntry: MoodEntry
+}
+
+input LogSleepInput {
+  bedtime: DateTime
+  durationMinutes: Int
+  qualityScore: Int
+  sleepDate: DateTime
+  wakeTime: DateTime
+}
+
+type LogSleepPayload {
+  errors: [UserError!]!
+  sleepEntry: SleepEntry
+}
+
+type MarkNotificationReadPayload {
+  errors: [UserError!]!
+  notification: Notification
+}
+
+input MemoryFactInput {
+  content: String!
+}
+
+type MetricCorrelation {
+  coefficient: Float!
+  description: String!
+  lagDays: Int!
+  metricALabel: String!
+  metricBLabel: String!
+  sampleSize: Int!
+}
+
+enum MonthlyRecurrenceMode {
+  DAYS_OF_MONTH
+  DAY_OF_MONTH
+  NTH_WEEKDAY
+  NTH_WEEKDAY_SET
+}
+
+type MoodEntry {
+  id: ID!
+  loggedAt: DateTime!
+  moodScore: Int!
+  note: String
+}
+
+type Mutation {
+  actOnRecommendation(id: ID!, input: ActOnRecommendationInput): ActOnRecommendationPayload!
+  cancelFocusSession(id: ID!): EndFocusSessionPayload!
+  cancelTask(id: ID!): CompleteTaskPayload!
+  changeSubscriptionTier(tier: SubscriptionTier!): ChangeSubscriptionTierPayload!
+  completeFocusSession(id: ID!): EndFocusSessionPayload!
+  completeHabitLog(date: DateTime!, habitId: ID!): CompleteHabitLogPayload!
+  completeOnboarding(input: CompleteOnboardingInput!): CompleteOnboardingPayload!
+  completeTask(actualDurationMinutes: Int, id: ID!): CompleteTaskPayload!
+  connectAppleCalendar(input: ConnectAppleCalendarInput!): ConnectAppleCalendarPayload!
+  createBillingPortalSession: CreateBillingPortalSessionPayload!
+  createCalendarEvent(input: CreateCalendarEventInput!): CreateCalendarEventPayload!
+  createCheckoutSession(tier: SubscriptionTier!): CreateCheckoutSessionPayload!
+  createGoal(input: CreateGoalInput!): CreateGoalPayload!
+  createHabit(input: CreateHabitInput!): CreateHabitPayload!
+  createJournalEntry(input: CreateJournalEntryInput!): CreateJournalEntryPayload!
+  createMemoryFact(input: MemoryFactInput!): CreateMemoryFactPayload!
+  createTag(input: CreateTagInput!): CreateTagPayload!
+  createTask(input: CreateTaskInput!): CreateTaskPayload!
+  deactivateHabit(id: ID!): DeactivateHabitPayload!
+  deleteAccount: DeleteAccountPayload!
+  deleteCalendarEvent(id: ID!): DeleteCalendarEventPayload!
+  deleteJournalEntry(id: ID!): DeleteJournalEntryPayload!
+  deleteMemoryFact(id: ID!): DeleteMemoryFactPayload!
+  deleteRoutine(type: RoutineType!): DeleteRoutinePayload!
+  disconnectAppleCalendar: DisconnectCalendarAccountPayload!
+  disconnectGoogleCalendar: DisconnectCalendarAccountPayload!
+  disconnectMicrosoftCalendar: DisconnectCalendarAccountPayload!
+  dismissRecommendation(id: ID!): RecommendationRunPayload!
+  generateRecommendations: RecommendationRunPayload!
+  logEnergy(input: LogEnergyInput!): LogEnergyPayload!
+  logMood(input: LogMoodInput!): LogMoodPayload!
+  logSleep(input: LogSleepInput!): LogSleepPayload!
+  markNotificationRead(id: ID!): MarkNotificationReadPayload!
+  reactivateHabit(id: ID!): DeactivateHabitPayload!
+  recordOnboardingWizardStep(step: OnboardingWizardStep!): RecordOnboardingWizardStepPayload!
+  registerPushSubscription(input: RegisterPushSubscriptionInput!): RegisterPushSubscriptionPayload!
+  reopenTask(id: ID!): CompleteTaskPayload!
+  requestReplan(scope: PlanScope): RequestReplanPayload!
+  respondToPlanRun(adds: [PlanChangeAddInput!], decision: PlanRunDecision!, edits: [PlanChangeEditInput!], id: ID!): RespondToPlanRunPayload!
+  sendChatMessage(content: String!, conversationId: ID): SendChatMessagePayload!
+  sendChatMessageStreaming(content: String!, conversationId: ID, requestId: String!): SendChatMessagePayload!
+  setRoutine(input: SetRoutineInput!): SetRoutinePayload!
+  setTodayRoutineCompletion(input: SetTodayRoutineCompletionInput!): SetTodayRoutineCompletionPayload!
+  startFocusSession(input: StartFocusSessionInput!): StartFocusSessionPayload!
+  startGoogleCalendarConnection(returnTo: String): StartGoogleCalendarConnectionPayload!
+  startMicrosoftCalendarConnection(returnTo: String): StartMicrosoftCalendarConnectionPayload!
+  submitDailyReflection(input: SubmitDailyReflectionInput!): SubmitDailyReflectionPayload!
+  syncAppleCalendarNow: SyncAppleCalendarPayload!
+  syncGoogleCalendarNow: SyncGoogleCalendarPayload!
+  syncMicrosoftCalendarNow: SyncMicrosoftCalendarPayload!
+  uncompleteHabitLog(date: DateTime!, habitId: ID!): CompleteHabitLogPayload!
+  unregisterPushSubscription(endpoint: String!): UnregisterPushSubscriptionPayload!
+  updateCalendarEvent(id: ID!, input: UpdateCalendarEventInput!): UpdateCalendarEventPayload!
+  updateGoal(id: ID!, input: UpdateGoalInput!): UpdateGoalPayload!
+  updateHabit(id: ID!, input: UpdateHabitInput!): UpdateHabitPayload!
+  updateJournalEntry(id: ID!, input: UpdateJournalEntryInput!): UpdateJournalEntryPayload!
+  updateMemoryFact(id: ID!, input: MemoryFactInput!): UpdateMemoryFactPayload!
+  updateNotificationPreferences(input: UpdateNotificationPreferencesInput!): UpdateNotificationPreferencesPayload!
+  updateProfile(input: UpdateProfileInput!): UpdateProfilePayload!
+  updateTask(id: ID!, input: UpdateTaskInput!): UpdateTaskPayload!
+}
+
+type Notification {
+  body: String!
+  createdAt: DateTime!
+  deeplink: String!
+  id: ID!
+  read: Boolean!
+  title: String!
+  type: String!
+}
+
+enum OnboardingWizardStep {
+  CALENDAR
+  PLAN
+}
+
+type PageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+}
+
+type PlanChange {
+  changeType: PlanChangeType!
+  id: ID!
+  previousStart: DateTime
+  proposedEnd: DateTime
+  proposedStart: DateTime
+  reason: String!
+  task: Task
+}
+
+input PlanChangeAddInput {
+  proposedStart: DateTime!
+  taskId: String!
+}
+
+input PlanChangeEditInput {
+  changeId: String!
+  proposedStart: DateTime
+  remove: Boolean
+}
+
+enum PlanChangeType {
+  CREATE
+  DELETE
+  MOVE
+  RESIZE
+}
+
+type PlanDiff {
+  changes: [PlanChange!]!
+  summary: String!
+}
+
+enum PlanRunDecision {
+  ACCEPT
+  EDIT
+  REJECT
+}
+
+enum PlanRunStatus {
+  ACCEPTED
+  EDITED
+  PROPOSED
+  REJECTED
+}
+
+enum PlanScope {
+  DAY
+  MONTH
+  WEEK
+}
+
+type Query {
+  activeFocusSession: FocusSession
+  aiConversation(id: ID!): AiConversation
+  aiConversations: [AiConversation!]!
+  analyticsSummary(days: Int): AnalyticsSummary!
+  appleCalendarAccount: CalendarAccount
+  calendarEvents(after: String, first: Int): CalendarEventConnection!
+  calendarEventsInRange(end: DateTime!, start: DateTime!): [CalendarEvent!]!
+  estimateTaskDuration(description: String, title: String!): Int
+  focusedMinutesForTask(taskId: ID!): Int
+  goals(status: GoalStatus): [Goal!]!
+  googleCalendarAccount: CalendarAccount
+  habits(activeOnly: Boolean): [Habit!]!
+  journalEntries(after: String, first: Int): JournalEntryConnection!
+  lastNightSleep: SleepEntry
+  latestPlanRun(scope: PlanScope): AiPlanRun
+  me: User!
+  memoryFacts: [AiMemoryFact!]!
+  microsoftCalendarAccount: CalendarAccount
+  notifications(first: Int): [Notification!]!
+  recentFocusSessions(first: Int): [FocusSession!]!
+  recentReflections(first: Int): [DailyReflection!]!
+  routine(type: RoutineType!): Routine
+  tasks(after: String, first: Int, goalId: ID, status: TaskStatus, statuses: [TaskStatus!]): TaskConnection!
+  todayEnergy: EnergyEntry
+  todayMood: MoodEntry
+  todayPlan(date: DateTime): TodayPlan!
+  todayRecommendations: AiRecommendationRun
+  todayReflection: DailyReflection
+  todayRoutines: [Routine!]!
+  unreadNotificationCount: Int!
+  vapidPublicKey: String
+}
+
+type Recommendation {
+  category: RecommendationCategory!
+  dismissed: Boolean!
+  id: ID!
+  message: String!
+}
+
+enum RecommendationCategory {
+  BREAK
+  MEAL
+  WORKOUT
+}
+
+type RecommendationRunPayload {
+  errors: [UserError!]!
+  recommendationRun: AiRecommendationRun
+}
+
+type RecordOnboardingWizardStepPayload {
+  errors: [UserError!]!
+  user: User
+}
+
+type ReflectionAnswers {
+  carryForward: String!
+  challenging: String!
+  wentWell: String!
+}
+
+input RegisterPushSubscriptionInput {
+  auth: String!
+  endpoint: String!
+  p256dh: String!
+}
+
+type RegisterPushSubscriptionPayload {
+  errors: [UserError!]!
+  registered: Boolean!
+}
+
+type RequestReplanPayload {
+  errors: [UserError!]!
+  planRun: AiPlanRun
+}
+
+type RespondToPlanRunPayload {
+  errors: [UserError!]!
+  planRun: AiPlanRun
+}
+
+type Routine {
+  aiSequenced: Boolean!
+  completedStepIds: [ID!]!
+  id: ID!
+  steps: [RoutineStep!]!
+  type: RoutineType!
+  updatedAt: DateTime!
+}
+
+type RoutineConsistency {
+  completedDaysInWindow: Int!
+  completionRatePercent: Int!
+  currentStreak: Int!
+  daysInWindow: Int!
+  type: RoutineType!
+}
+
+type RoutineStep {
+  id: ID!
+  label: String!
+}
+
+enum RoutineType {
+  EVENING
+  MORNING
+}
+
+type SendChatMessagePayload {
+  conversation: AiConversation
+  errors: [UserError!]!
+}
+
+input SetRoutineInput {
+  aiSequenced: Boolean!
+  steps: [String!]!
+  type: RoutineType!
+}
+
+type SetRoutinePayload {
+  errors: [UserError!]!
+  routine: Routine
+}
+
+input SetTodayRoutineCompletionInput {
+  completedStepIds: [String!]!
+  type: RoutineType!
+}
+
+type SetTodayRoutineCompletionPayload {
+  errors: [UserError!]!
+  routine: Routine
+}
+
+type SleepEntry {
+  bedtime: DateTime
+  durationMinutes: Int
+  id: ID!
+  qualityScore: Int
+  sleepDate: DateTime!
+  source: SleepSource!
+  wakeTime: DateTime
+}
+
+enum SleepSource {
+  HEALTHKIT
+  HEALTH_CONNECT
+  MANUAL
+  OURA
+  WHOOP
+}
+
+input StartFocusSessionInput {
+  kind: FocusSessionKind
+  plannedDurationMinutes: Int!
+  taskId: ID
+}
+
+type StartFocusSessionPayload {
+  errors: [UserError!]!
+  session: FocusSession
+}
+
+type StartGoogleCalendarConnectionPayload {
+  authUrl: String
+  errors: [UserError!]!
+}
+
+type StartMicrosoftCalendarConnectionPayload {
+  authUrl: String
+  errors: [UserError!]!
+}
+
+input SubmitDailyReflectionInput {
+  carryForward: String!
+  challenging: String!
+  wentWell: String!
+}
+
+type SubmitDailyReflectionPayload {
+  errors: [UserError!]!
+  reflection: DailyReflection
+}
+
+type Subscription {
+  chatStreamChunk(requestId: String!): ChatStreamChunk!
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+}
+
+enum SubscriptionTier {
+  FREE
+  PLUS
+  PRO
+}
+
+type SyncAppleCalendarPayload {
+  account: CalendarAccount
+  errors: [UserError!]!
+  syncedEventCount: Int
+}
+
+type SyncGoogleCalendarPayload {
+  account: CalendarAccount
+  errors: [UserError!]!
+  syncedEventCount: Int
+}
+
+type SyncMicrosoftCalendarPayload {
+  account: CalendarAccount
+  errors: [UserError!]!
+  syncedEventCount: Int
+}
+
+type Tag {
+  color: String
+  id: ID!
+  name: String!
+}
+
+type Task {
+  actualDurationMinutes: Int
+  completedAt: DateTime
+  createdAt: DateTime!
+  description: String
+  dueDate: DateTime
+  estimatedDurationMinutes: Int
+  goal: Goal
+  id: ID!
+  isAiScheduled: Boolean!
+  parentTaskId: ID
+  priority: Int!
+  scheduledEnd: DateTime
+  scheduledStart: DateTime
+  status: TaskStatus!
+  subtasks: [Task!]!
+  tags: [Tag!]!
+  title: String!
+}
+
+type TaskConnection {
+  edges: [TaskEdge!]!
+  pageInfo: PageInfo!
+}
+
+type TaskEdge {
+  cursor: String!
+  node: Task!
+}
+
+enum TaskStatus {
+  CANCELLED
+  COMPLETED
+  IN_PROGRESS
+  PENDING
+}
+
+type TodayPlan {
+  date: DateTime!
+  events: [CalendarEvent!]!
+  greeting: String!
+  habits: [Habit!]!
+  hasEvents: Boolean!
+  hasTasks: Boolean!
+  lastNightSleep: SleepEntry
+  latestPlanRun: AiPlanRun
+  tasks: [Task!]!
+  tasksCount: Float!
+  todayEnergy: EnergyEntry
+  todayMood: MoodEntry
+  user: User!
+}
+
+type UnregisterPushSubscriptionPayload {
+  errors: [UserError!]!
+  unregistered: Boolean!
+}
+
+input UpdateCalendarEventInput {
+  description: String
+  endTime: DateTime
+  isImmovable: Boolean
+  startTime: DateTime
+  title: String
+}
+
+type UpdateCalendarEventPayload {
+  errors: [UserError!]!
+  event: CalendarEvent
+}
+
+input UpdateGoalInput {
+  description: String
+  status: GoalStatus
+  targetDate: DateTime
+  title: String
+}
+
+type UpdateGoalPayload {
+  errors: [UserError!]!
+  goal: Goal
+}
+
+input UpdateHabitInput {
+  count: Int
+  dayOfMonth: Int
+  daysOfMonth: [Int!]
+  daysOfWeek: [Int!]
+  frequency: HabitFrequency
+  goalId: ID
+  intervalDays: Int
+  intervalMonths: Int
+  intervalWeeks: Int
+  monthlyMode: MonthlyRecurrenceMode
+  monthlyOrdinal: Int
+  monthlyWeekday: Int
+  monthlyWeekdaySet: [Int!]
+  preferredTime: String
+  protectedDurationMinutes: Int
+  title: String
+  until: String
+}
+
+type UpdateHabitPayload {
+  errors: [UserError!]!
+  habit: Habit
+}
+
+input UpdateJournalEntryInput {
+  content: String!
+}
+
+type UpdateJournalEntryPayload {
+  entry: JournalEntry
+  errors: [UserError!]!
+}
+
+type UpdateMemoryFactPayload {
+  errors: [UserError!]!
+  fact: AiMemoryFact
+}
+
+input UpdateNotificationPreferencesInput {
+  emailNotificationsEnabled: Boolean
+  phoneNumber: String
+  pushNotificationsEnabled: Boolean
+  quietHoursEnd: String
+  quietHoursStart: String
+  smsNotificationsEnabled: Boolean
+}
+
+type UpdateNotificationPreferencesPayload {
+  errors: [UserError!]!
+  user: User
+}
+
+input UpdateProfileInput {
+  chronotype: Chronotype
+  displayName: String
+  pomodoroCyclesBeforeLongBreak: Int
+  pomodoroLongBreakMinutes: Int
+  pomodoroShortBreakMinutes: Int
+  pomodoroWorkMinutes: Int
+  reflectionCarryForwardLabel: String
+  reflectionChallengingLabel: String
+  reflectionWentWellLabel: String
+  reminderEveningRoutineHour: Int
+  reminderHabitMaxOverdueMinutes: Int
+  reminderHabitMinOverdueMinutes: Int
+  reminderMorningRoutineHour: Int
+  reminderReflectionHour: Int
+  timezone: String
+  timezoneManual: Boolean
+  workHoursEnd: String
+  workHoursStart: String
+}
+
+type UpdateProfilePayload {
+  errors: [UserError!]!
+  user: User
+}
+
+input UpdateTaskInput {
+  description: String
+  dueDate: DateTime
+  estimatedDurationMinutes: Int
+  goalId: ID
+  priority: Int
+  status: TaskStatus
+  tagIds: [ID!]
+  title: String
+}
+
+type UpdateTaskPayload {
+  errors: [UserError!]!
+  task: Task
+}
+
+type User {
+  chronotype: Chronotype
+  displayName: String
+  email: String!
+  emailNotificationsEnabled: Boolean!
+  id: ID!
+  onboardingCompletedAt: DateTime
+  onboardingWizardStep: OnboardingWizardStep
+  phoneNumber: String
+  pomodoroCyclesBeforeLongBreak: Int
+  pomodoroLongBreakMinutes: Int
+  pomodoroShortBreakMinutes: Int
+  pomodoroWorkMinutes: Int
+  pushNotificationsEnabled: Boolean!
+  quietHoursEnd: String
+  quietHoursStart: String
+  reflectionCarryForwardLabel: String
+  reflectionChallengingLabel: String
+  reflectionWentWellLabel: String
+  reminderEveningRoutineHour: Int
+  reminderHabitMaxOverdueMinutes: Int
+  reminderHabitMinOverdueMinutes: Int
+  reminderMorningRoutineHour: Int
+  reminderReflectionHour: Int
+  smsNotificationsEnabled: Boolean!
+  subscription: BillingSubscription!
+  timezone: String!
+  timezoneManual: Boolean!
+  workHoursEnd: String
+  workHoursStart: String
+}
+
+type UserError {
+  code: String!
+  field: String
+  message: String!
+}

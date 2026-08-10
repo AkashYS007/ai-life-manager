@@ -1,0 +1,29 @@
+# Local development infrastructure only.
+# Production runs on Amazon Aurora PostgreSQL + ElastiCache Redis (see Architecture Document §4.4).
+version: "3.9"
+services:
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ailm
+      POSTGRES_PASSWORD: ailm_dev_password
+      POSTGRES_DB: ai_life_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ailm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

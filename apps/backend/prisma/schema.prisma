@@ -1,0 +1,911 @@
+// Foundation increment: identity & billing domain (Database Design Document §4.1).
+// Tasks feature increment adds the Tasks & Goals domain (§4.2) below.
+// Calendar, habits, signals, and the AI layer are added in later feature increments.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum Chronotype {
+  EARLY_BIRD
+  NIGHT_OWL
+  NEUTRAL
+}
+
+// Resumable onboarding wizard increment. The wizard has four steps (Welcome
+// → Diagnostic quiz → Connect calendar → First plan), but `onboardingCompletedAt`
+// only ever marks the second one (the quiz) done — reaching it at all, even
+// with every question skipped, is what "completed onboarding" has always
+// meant (see OnboardingService.complete's own comment). That left the two
+// steps after it purely client-side React state: closing the tab between
+// the quiz and the calendar step lost all memory of ever having reached it,
+// and reopening `/onboarding` fell back to jumping straight to the quiz
+// step again (see the Fix onboarding calendar-connect redirect increment's
+// own note on discovering this exact gap while fixing a related one). Only
+// two values are ever written — CALENDAR the moment the quiz submits (since
+// that's always the very next step), PLAN when the calendar step's own
+// Continue button is clicked — there's no WELCOME or QUIZ value, since
+// `onboardingCompletedAt` being unset already means "still at or before the
+// quiz," and no DONE value either, since finishing the First plan step just
+// navigates to /today with nothing further to resume.
+enum OnboardingWizardStep {
+  CALENDAR
+  PLAN
+}
+
+enum SubscriptionTier {
+  FREE
+  PLUS
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+model User {
+  id                    String    @id @default(uuid())
+  email                 String    @unique
+  authProviderId        String    @unique @map("auth_provider_id")
+  displayName           String?   @map("display_name")
+  timezone              String    @default("UTC")
+  chronotype            Chronotype?
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
+  // Resumable onboarding wizard increment — see this file's own comment on
+  // the OnboardingWizardStep enum above for the full reasoning. `null`
+  // means "quiz not yet submitted, or column never written" (every account
+  // that finished onboarding before this migration falls into the latter
+  // case — see the frontend's own comment on how that's handled).
+  onboardingWizardStep  OnboardingWizardStep? @map("onboarding_wizard_step")
+  // Smart notifications increment (Database Design Document §4.7 specs the
+  // `notifications` table itself, but — same gap as Focus sessions/Routines/
+  // AiRecommendationRun before it — never actually models where quiet-hours/
+  // channel-opt-in preferences live, even though the API Design Document
+  // names a real `updateNotificationPreferences` mutation for them. A 1:1
+  // per-user settings shape, so columns directly on User are the natural,
+  // normalized home for these — not a separate one-row-per-user table that
+  // would just need an extra join every time. HH:mm 24h local-time strings
+  // (same convention Habit.preferredTime and Routine's AI-sequencing prompt
+  // already use), null meaning "no quiet hours configured."
+  quietHoursStart            String?  @map("quiet_hours_start")
+  quietHoursEnd               String?  @map("quiet_hours_end")
+  pushNotificationsEnabled    Boolean  @default(true) @map("push_notifications_enabled")
+  emailNotificationsEnabled   Boolean  @default(false) @map("email_notifications_enabled")
+  smsNotificationsEnabled     Boolean  @default(false) @map("sms_notifications_enabled")
+  // SMS delivery increment: smsNotificationsEnabled has existed since the
+  // Smart notifications increment, but toggling it on always did nothing —
+  // there was no phone number anywhere on this model for SmsService to
+  // actually send to. E.164 format ("+15551234567", validated in
+  // UpdateNotificationPreferencesInput, not here), null meaning "no number
+  // on file," same "the checkbox truly does nothing until this is also
+  // set" gap the old Real notification delivery increment's own note used
+  // to flag explicitly for this exact field.
+  phoneNumber                String?  @map("phone_number")
+  // Diagnostic onboarding increment — the PRD (§7.1) and UI/UX Design
+  // Document (§5, §10) both require onboarding to establish "baseline
+  // chronotype, work hours, priorities," but neither the Database nor API
+  // Design Document ever actually modeled a work-hours field (only
+  // `chronotype`/`onboarding_completed_at` exist, same gap pattern as every
+  // other increment this project — quiet hours, notification channels,
+  // recommendation runs). planner.service.ts's WORKDAY_START_HOUR/
+  // WORKDAY_END_HOUR fixed constants explicitly flagged this as a known gap
+  // ("no user-configurable work-hours field exists yet") — this closes it.
+  // HH:mm 24h local-time strings, same convention as quietHoursStart/End
+  // and Habit.preferredTime; null falls back to the planner's fixed
+  // 7am-9pm default (see planner.service.ts).
+  workHoursStart         String?   @map("work_hours_start")
+  workHoursEnd           String?   @map("work_hours_end")
+  // Visible settings screen increment — TimezoneSync.tsx silently overwrites
+  // `timezone` with the browser-detected value every time it differs, which
+  // is exactly right for a person who's never touched this, but would
+  // otherwise clobber a deliberate manual choice made from the new
+  // /settings screen the very next time any page loads. `true` once someone
+  // has explicitly saved a timezone from Settings — TimezoneSync checks this
+  // and skips its own write while it's set. Settings also offers an explicit
+  // "use browser-detected automatically" action that clears it back to
+  // `false`, handing control back to the silent auto-sync.
+  timezoneManual         Boolean   @default(false) @map("timezone_manual")
+  // Configurable Pomodoro durations increment — same "null means fall back
+  // to the fixed default" convention workHoursStart/End already established
+  // just above, applied to Pomodoro mode's own four fixed constants
+  // (previously hardcoded in apps/web/src/app/focus/page.tsx: 25-minute
+  // work blocks, a 5-minute short break, a 15-minute long break, a long
+  // break every 4th cycle). A person who's never touched Settings gets the
+  // exact same classic cadence as before this increment; nothing here
+  // changes for them.
+  pomodoroWorkMinutes           Int?      @map("pomodoro_work_minutes")
+  pomodoroShortBreakMinutes     Int?      @map("pomodoro_short_break_minutes")
+  pomodoroLongBreakMinutes      Int?      @map("pomodoro_long_break_minutes")
+  pomodoroCyclesBeforeLongBreak Int?      @map("pomodoro_cycles_before_long_break")
+  // Configurable reminder windows/thresholds increment — same "null means
+  // fall back to the fixed default" convention as workHoursStart/End and the
+  // Pomodoro columns just above, applied to SchedulerService's own five
+  // previously-hardcoded constants (morning/evening routine reminder hour,
+  // reflection reminder hour, and the min/max "how overdue" window a habit
+  // reminder fires within). A person who's never touched Settings gets the
+  // exact same 8am/8pm/9pm/15-120min defaults as before this increment.
+  // Hour fields are whole-hour local time (0-23), matching the real
+  // precision SchedulerService's own 30-minute catch window already has —
+  // not minute-precise HH:mm like workHoursStart/End, since a reminder
+  // firing sometime in a 30-minute window was never minute-precise to begin
+  // with.
+  reminderMorningRoutineHour    Int?      @map("reminder_morning_routine_hour")
+  reminderEveningRoutineHour    Int?      @map("reminder_evening_routine_hour")
+  reminderReflectionHour        Int?      @map("reminder_reflection_hour")
+  reminderHabitMinOverdueMinutes Int?     @map("reminder_habit_min_overdue_minutes")
+  reminderHabitMaxOverdueMinutes Int?     @map("reminder_habit_max_overdue_minutes")
+  // Configurable daily reflection questions increment — same "null means
+  // fall back to the fixed default" convention as every field just above.
+  // Closes "the 3 daily reflection questions are fixed, not
+  // user-configurable" from the README's own "not built yet" list, but
+  // deliberately narrowly: these three columns rename the *wording* shown
+  // for each of the three fixed questions, not the underlying answer shape
+  // — `DailyReflection.answers` still always stores exactly
+  // `{wentWell, challenging, carryForward}` regardless of what label a
+  // person gave each one, and a fourth custom question isn't possible (the
+  // AI summary prompt, Insights, and the stored JSON shape all assume
+  // exactly these three keys). A person who's never touched Settings gets
+  // the exact same three classic questions as before this increment.
+  reflectionWentWellLabel      String?   @map("reflection_went_well_label")
+  reflectionChallengingLabel   String?   @map("reflection_challenging_label")
+  reflectionCarryForwardLabel  String?   @map("reflection_carry_forward_label")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  deletedAt             DateTime? @map("deleted_at")
+
+  subscription      Subscription?
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id                   String              @id @default(uuid())
+  userId               String              @unique @map("user_id")
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeCustomerId     String?             @map("stripe_customer_id")
+  stripeSubscriptionId String?             @map("stripe_subscription_id")
+  tier                 SubscriptionTier    @default(FREE)
+  status               SubscriptionStatus  @default(ACTIVE)
+  currentPeriodEnd     DateTime?           @map("current_period_end")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks & Goals domain (Database Design Document §4.2)
+// ---------------------------------------------------------------------------
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Goal {
+  id          String     @id @default(uuid())
+  userId      String     @map("user_id")
+  title       String
+  description String?
+  targetDate  DateTime?  @map("target_date")
+  status      GoalStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  tasks  Task[]
+  // Linking habits to goals increment.
+  habits Habit[]
+
+  @@index([userId, status])
+  @@map("goals")
+}
+
+model Task {
+  id                       String     @id @default(uuid())
+  userId                   String     @map("user_id")
+  goalId                   String?    @map("goal_id")
+  goal                     Goal?      @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  parentTaskId             String?    @map("parent_task_id")
+  parentTask               Task?      @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks                 Task[]     @relation("TaskSubtasks")
+  title                    String
+  description              String?
+  priority                 Int        @default(3)
+  status                   TaskStatus @default(PENDING)
+  estimatedDurationMinutes Int?       @map("estimated_duration_minutes")
+  actualDurationMinutes    Int?       @map("actual_duration_minutes")
+  dueDate                  DateTime?  @map("due_date")
+  scheduledStart           DateTime?  @map("scheduled_start")
+  scheduledEnd             DateTime?  @map("scheduled_end")
+  isAiScheduled            Boolean    @default(false) @map("is_ai_scheduled")
+  createdAt                DateTime   @default(now()) @map("created_at")
+  updatedAt                DateTime   @updatedAt @map("updated_at")
+  completedAt              DateTime?  @map("completed_at")
+
+  tags TaskTag[]
+  focusSessions FocusSession[]
+
+  @@index([userId, status, scheduledStart])
+  @@index([userId, dueDate])
+  @@map("tasks")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar domain (Database Design Document §4.3) — native-events increment.
+// `calendarAccountId`/`externalEventId`/`lastSyncedAt` and the CalendarAccount
+// table itself (encrypted OAuth tokens, sync cursors) are deliberately left
+// for the follow-up sync increment: building the encrypted-token
+// infrastructure before there's a provider to sync with would be unused
+// complexity today. `source` is still a 4-value enum now, not just NATIVE,
+// because adding the other three later is a real migration either way, and
+// modeling the intent now costs nothing.
+enum CalendarEventSource {
+  NATIVE
+  GOOGLE
+  MICROSOFT
+  APPLE
+}
+
+model CalendarEvent {
+  id                String              @id @default(uuid())
+  userId            String              @map("user_id")
+  calendarAccountId String?             @map("calendar_account_id")
+  calendarAccount   CalendarAccount?    @relation(fields: [calendarAccountId], references: [id], onDelete: Cascade)
+  externalEventId   String?             @map("external_event_id")
+  title             String
+  description       String?
+  startTime         DateTime            @map("start_time")
+  endTime           DateTime            @map("end_time")
+  isImmovable       Boolean             @default(false) @map("is_immovable")
+  isAiFocusBlock    Boolean             @default(false) @map("is_ai_focus_block")
+  source            CalendarEventSource @default(NATIVE)
+  lastSyncedAt      DateTime?           @map("last_synced_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  @@unique([calendarAccountId, externalEventId])
+  @@index([userId, startTime, endTime])
+  @@map("calendar_events")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar sync domain (Database Design Document §4.3) — started Google-only,
+// pull-only; Microsoft (pull + push-deletes) and Apple (pull-only, CalDAV)
+// followed in later increments, all sharing this same table via the
+// `provider` column and the generic `syncToken`/`calendarUrl` columns rather
+// than one table per provider. Disconnecting an account cascades to delete
+// its synced events (onDelete: Cascade above) rather than leaving orphaned
+// foreign-calendar data with no way to refresh it.
+enum CalendarAccountProvider {
+  GOOGLE
+  MICROSOFT
+  APPLE
+}
+
+enum CalendarAccountStatus {
+  ACTIVE
+  ERROR
+  REVOKED
+}
+
+model CalendarAccount {
+  id                    String                  @id @default(uuid())
+  userId                String                  @map("user_id")
+  provider              CalendarAccountProvider
+  externalAccountEmail  String?                 @map("external_account_email")
+  // Encrypted at the application layer (token-cipher.ts) before storage —
+  // AES-256-GCM keyed from TOKEN_ENCRYPTION_KEY locally, standing in for the
+  // real KMS-backed envelope encryption a production deployment would use
+  // (Architecture Document §7), same "documented local equivalent" pattern
+  // as AUTH_MODE=dev standing in for real Clerk sessions.
+  accessTokenEncrypted  Bytes                   @map("access_token_encrypted")
+  refreshTokenEncrypted Bytes                   @map("refresh_token_encrypted")
+  syncToken             String?                 @map("sync_token")
+  // Apple (CalDAV) sync only — the resolved CalDAV URL of the specific
+  // calendar this account syncs, discovered once at connect() time via the
+  // principal → calendar-home-set → calendar-list PROPFIND chain (CalDAV has
+  // no fixed per-user calendar URL the way Google/Microsoft's REST APIs do),
+  // so every later sync can hit it directly instead of re-discovering it.
+  // Unused by GOOGLE/MICROSOFT accounts.
+  calendarUrl           String?                 @map("calendar_url")
+  status                CalendarAccountStatus   @default(ACTIVE)
+  lastSyncedAt          DateTime?               @map("last_synced_at")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  // Real-time calendar updates (webhooks) increment — GOOGLE/MICROSOFT only
+  // (see CalendarAccountsService.registerWebhook / MicrosoftCalendarAccountsService.
+  // registerWebhook for where these get populated; unused by APPLE, which has
+  // no webhook mechanism this app implements — see the README's own note on
+  // why CalDAV push isn't in scope here). `webhookChannelId` holds Google's
+  // own `channel.id` or Microsoft's `subscriptionId` — same "one generic
+  // column, provider-specific meaning" pattern `syncToken` above already
+  // establishes for the sync cursor. `webhookResourceId` is Google-only
+  // (needed to later call `channels.stop`; Microsoft's subscription id alone
+  // is enough to delete/renew its own subscription, no second id needed).
+  // `webhookVerificationToken` holds Google's channel `token` or Microsoft's
+  // `clientState` — an app-generated secret neither provider ever sees
+  // reused elsewhere, checked on every incoming webhook POST so a request
+  // claiming to be "for this account" can't be spoofed by guessing a UUID.
+  // `webhookExpiresAt` is when the channel/subscription needs renewing —
+  // both providers cap how long one lasts (Google: max ~30 days for
+  // calendars in practice; Microsoft: max 4230 minutes, ~3 days, for
+  // events) — `null` means no webhook is currently registered (e.g.
+  // BACKEND_PUBLIC_URL was never configured, or registration itself failed
+  // best-effort at connect time).
+  webhookChannelId         String?   @map("webhook_channel_id")
+  webhookResourceId        String?   @map("webhook_resource_id")
+  webhookVerificationToken String?   @map("webhook_verification_token")
+  webhookExpiresAt         DateTime? @map("webhook_expires_at")
+
+  events CalendarEvent[]
+
+  // One connected account per provider per user in this increment — simpler
+  // than modeling multiple Google accounts per user, which nothing in the
+  // PRD asks for yet.
+  @@unique([userId, provider])
+  @@map("calendar_accounts")
+}
+
+// ---------------------------------------------------------------------------
+// Habits domain (Database Design Document §4.4). `rrule` stores a real
+// iCalendar RRULE string (the doc's own rationale: "reuses a well-tested
+// recurrence standard instead of inventing one"), but this increment's API
+// only lets you create the two most common shapes — FREQ=DAILY or
+// FREQ=WEEKLY;BYDAY=... — via `rrule.ts`. The column can hold any valid
+// RRULE, so richer patterns (every N weeks, monthly, etc.) are a future API
+// change, not a future migration. `createdAt`/`updatedAt` aren't spelled out
+// in the doc's column summary but follow the same audit-column convention
+// every other editable table here already has (Task, CalendarEvent, Goal).
+model Habit {
+  id                       String    @id @default(uuid())
+  userId                   String    @map("user_id")
+  title                    String
+  rrule                    String
+  // Postgres TIME column — Prisma represents this as a Date under the hood
+  // (1970-01-01 base date), so app code only ever reads the hours/minutes
+  // back out of it, never the date part.
+  preferredTime            DateTime? @map("preferred_time") @db.Time()
+  protectedDurationMinutes Int       @map("protected_duration_minutes")
+  active                   Boolean   @default(true)
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  // Linking habits to goals increment — mirrors Task.goalId/goal exactly
+  // (same optional relation, same onDelete: SetNull so deleting a goal
+  // never cascades into deleting the habits linked to it, just unlinks
+  // them). Set-at-creation only, same as every other Habit field except
+  // `active` — there's no habit edit UI at all yet, goal linking included.
+  goalId String? @map("goal_id")
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  logs HabitLog[]
+
+  @@index([userId, active])
+  @@map("habits")
+}
+
+model HabitLog {
+  id            String    @id @default(uuid())
+  habitId       String    @map("habit_id")
+  habit         Habit     @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  scheduledDate DateTime  @map("scheduled_date") @db.Date
+  completedAt   DateTime? @map("completed_at")
+
+  @@unique([habitId, scheduledDate])
+  @@map("habit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Signal Collection domain (Database Design Document §4.5) — mood, energy,
+// sleep. This increment is manual self-report only (PRD §7.2's P0 scope);
+// wearable sync (HealthKit/Health Connect/Oura/Whoop) and inferred energy
+// are P1s the `source` enums already leave room for without a future schema
+// change — same reserved-value pattern used for CalendarEventSource.
+enum EnergySource {
+  MANUAL
+  INFERRED
+}
+
+enum SleepSource {
+  MANUAL
+  HEALTHKIT
+  HEALTH_CONNECT
+  OURA
+  WHOOP
+}
+
+model MoodEntry {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  loggedAt  DateTime @default(now()) @map("logged_at")
+  moodScore Int      @map("mood_score") // 1-5, enforced in the DTO layer (class-validator), same convention as Task.priority
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, loggedAt])
+  @@map("mood_entries")
+}
+
+model EnergyEntry {
+  id          String       @id @default(uuid())
+  userId      String       @map("user_id")
+  loggedAt    DateTime     @default(now()) @map("logged_at")
+  energyScore Int          @map("energy_score") // 1-5
+  source      EnergySource @default(MANUAL)
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@index([userId, loggedAt])
+  @@map("energy_entries")
+}
+
+model SleepEntry {
+  id               String      @id @default(uuid())
+  userId           String      @map("user_id")
+  // The morning the sleep is attributed to (Database Design Document
+  // §4.5), not the calendar date bedtime fell on — "last night's sleep" is
+  // always sleepDate = today, which is what makes `lastNightSleep` on
+  // TodayPlan a simple lookup by today's date rather than a bedtime/waketime
+  // range query.
+  sleepDate        DateTime    @map("sleep_date") @db.Date
+  bedtime          DateTime?
+  wakeTime         DateTime?   @map("wake_time")
+  durationMinutes  Int?        @map("duration_minutes")
+  qualityScore     Int?        @map("quality_score") // 1-5, nullable
+  source           SleepSource @default(MANUAL)
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  @@unique([userId, sleepDate])
+  @@map("sleep_entries")
+}
+
+// ---------------------------------------------------------------------------
+// AI Layer domain (Database Design Document §4.6) — daily plan generation
+// and free-form chat. `diff` is JSONB deliberately, not a normalized
+// table: the Database Design Document calls this out explicitly as one of
+// the legitimate JSONB cases ("a diff is inherently a heterogeneous tree of
+// changes"), and it's read/written whole by PlannerService, never filtered
+// by an internal field in a WHERE clause. AI Memory (ai_memory_facts,
+// ai_memory_embeddings) is a separate, larger increment — not built yet.
+enum PlanRunStatus {
+  PROPOSED
+  ACCEPTED
+  EDITED
+  REJECTED
+}
+
+enum PlanChangeType {
+  MOVE
+  CREATE
+  DELETE
+  RESIZE
+}
+
+// Weekly/monthly AI plan generation increment: `scope` widens the existing
+// daily-planning machinery to a longer time horizon rather than a separate
+// table — `diff.changes[].proposedStart/proposedEnd` were already full ISO
+// datetimes (never date-restricted at the storage layer), so a WEEK/MONTH
+// run's multi-day changes fit the exact same shape a DAY run always had.
+// Defaults to DAY so every plan run created before this increment (and
+// every plan run created by code that doesn't know about scope yet) reads
+// back as DAY, the only value that ever existed until now.
+enum PlanScope {
+  DAY
+  WEEK
+  MONTH
+}
+
+model AiPlanRun {
+  id           String        @id @default(uuid())
+  userId       String        @map("user_id")
+  triggerEvent String        @map("trigger_event") // always "manual_request" this increment — event-driven triggers (Architecture §5.3) are a later increment
+  status       PlanRunStatus @default(PROPOSED)
+  scope        PlanScope     @default(DAY)
+  diff         Json // { summary: string, changes: [{ changeType, taskId, previousStart, proposedStart, reason }] }
+  modelUsed    String        @map("model_used")
+  generatedAt  DateTime      @default(now()) @map("generated_at")
+  respondedAt  DateTime?     @map("responded_at")
+
+  @@index([userId, scope, generatedAt])
+  @@map("ai_plan_runs")
+}
+
+// ---------------------------------------------------------------------------
+// AI recommendations domain (PRD §7.4 — "AI recommendations (breaks,
+// workouts, meals)," P0, "core to the 'automatically adjusts' promise").
+// Same situation as Focus sessions and RoutineLog before it: the approved
+// Database Design Document's table inventory never actually models this
+// domain, even though the PRD marks it P0 — a real gap in the approved
+// docs, designed fresh here rather than pretending it was pre-specified.
+// One row per user per day (`@@unique([userId, date])`, same upsert-by-date
+// shape as DailyReflection and Routine) holding a JSONB array of individual
+// recommendations — JSONB is the right call here for the same reason
+// AiPlanRun.diff already is: a small, heterogeneous, always-read/written-
+// whole list, never filtered by an internal field in a WHERE clause.
+// Regenerating replaces the whole array (see RecommendationsService.generate)
+// rather than merging — same full-replace precedent SetRoutineInput already
+// established for "small, rarely-edited, always-regenerated-fresh" content.
+enum RecommendationCategory {
+  BREAK
+  WORKOUT
+  MEAL
+}
+
+model AiRecommendationRun {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  date            DateTime @map("date") @db.Date
+  recommendations Json // [{ id, category, message, dismissed }]
+  modelUsed       String?  @map("model_used")
+  generatedAt     DateTime @default(now()) @map("generated_at")
+
+  @@unique([userId, date])
+  @@map("ai_recommendation_runs")
+}
+
+// AI chat (Database Design Document §4.6's ai_conversations/ai_chat_messages).
+// "Simple Q&A first" scope, per the approved plan for this increment: a
+// plain synchronous request/reply (no GraphQL subscription streaming yet),
+// and the AI can only talk, not take actions — so `role` only ever takes
+// USER/ASSISTANT values right now; TOOL is reserved (same zero-cost
+// forward-compat pattern as CalendarEventSource's unused provider values)
+// for when tool-calling actions land in a later increment. `toolCalls` is
+// likewise unused JSONB, reserved for that same future increment rather
+// than a speculative column added with nothing to fill it — the Database
+// Design Document names this exact shape, so keeping the column now avoids
+// a second migration later.
+//
+// AiConversation.messages and the top-level conversations list are plain
+// bounded queries here, not full Relay cursor connections — a deliberate
+// simplification given how few messages/conversations a single user will
+// realistically have this early (same reasoning CalendarService.listInRange
+// used for "naturally bounded" queries over Relay pagination); revisit if
+// usage ever grows enough to need it, same as TasksService already has both
+// a bounded `listOpenForUser` and a Relay-paginated `listConnection`.
+model AiConversation {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  // Not a real AI-generated summary yet (the doc's "auto-generated summary
+  // title") — just the first ~60 characters of the opening message. Cheap,
+  // honest, and avoids a second AI call just to title a conversation.
+  title         String?
+  startedAt     DateTime @default(now()) @map("started_at")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+
+  messages AiChatMessage[]
+
+  @@index([userId, lastMessageAt])
+  @@map("ai_conversations")
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
+model AiChatMessage {
+  id             String         @id @default(uuid())
+  conversationId String         @map("conversation_id")
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           ChatMessageRole
+  content        String
+  toolCalls      Json?          @map("tool_calls")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@map("ai_chat_messages")
+}
+
+// AI Memory (Database Design Document §4.6's ai_memory_facts, PRD §9 — "the
+// moat"). "Manual memory first" scope, per the approved plan for this
+// increment: the person directly tells the AI things to remember (a simple
+// list they add/edit/delete), which both the AI planner and chat then use
+// as real context. `factType` is a real CHECK-style constrained string per
+// the doc (chronotype | preference | task_duration_accuracy |
+// intervention_response), but this increment's API only ever writes
+// 'preference' — the other three are reserved for a future increment where
+// the AI infers them automatically from behavior (chronotype from
+// actually-completed-task timestamps, task_duration_accuracy from
+// estimated-vs-actual, intervention_response from plan-run accept/reject
+// patterns), same zero-cost forward-compat pattern used throughout this
+// codebase. `confidence` defaults to 1.0 for manually-stated facts (the
+// person said it themselves — no inference uncertainty); automatically
+// inferred facts in a future increment would set it lower. `value` is
+// JSONB because the doc explicitly calls this out as legitimate JSONB use
+// (shape varies by fact_type, read/written whole, never queried by an
+// internal field) — this increment always writes `{ text: string }`.
+// ai_memory_embeddings (semantic search over journal/chat via pgvector) is
+// a separate, larger increment — not built yet.
+model AiMemoryFact {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  factType   String   @default("preference") @map("fact_type")
+  key        String
+  value      Json
+  confidence Float    @default(1.0)
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, factType, key])
+  @@map("ai_memory_facts")
+}
+
+// ---------------------------------------------------------------------------
+// Journaling domain (Database Design Document §4.5's journal_entries —
+// listed under Signal Collection there, alongside mood/energy/sleep, since
+// journal sentiment is meant to feed mood inference per the PRD). "Write
+// and read entries first" scope for this increment: sentimentScore stays
+// null for now (the doc's own note: "populated async after write by the AI
+// Memory pipeline" — that pipeline isn't built, same honest gap as
+// AiMemoryFact's still-unbuilt chronotype/task_duration_accuracy signals).
+// updatedAt exists because the doc explicitly lists both created_at and
+// updated_at for this table (unlike, say, mood_entries, which is
+// create-only) — a journal entry is meant to be editable after writing.
+model JournalEntry {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  content         String
+  sentimentScore  Float?   @map("sentiment_score")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@map("journal_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Daily reflection domain (Database Design Document §5.1's daily_reflections
+// — "End-of-day 3-question ritual (PRD §7.3)"). One row per (user, date),
+// same "correct in place, don't duplicate" reasoning as SleepEntry's
+// @@unique([userId, sleepDate]) — submitting again for the same day updates
+// that day's answers rather than creating a second row. `answers` is JSONB
+// per the doc's own column spec (a fixed shape here — { wentWell,
+// challenging, carryForward } — but kept as Json rather than three separate
+// columns to match the approved doc exactly, same reasoning AiPlanRun.diff
+// already uses this codebase). `aiSummary` is populated synchronously at
+// submit time by a real Claude call (mirrors chat's AnthropicClient.sendMessage
+// usage) when ANTHROPIC_API_KEY is configured; when it isn't, the reflection
+// still saves successfully with aiSummary left null — same "the feature
+// degrades honestly, it doesn't hard-fail" pattern the AI daily planner and
+// chat both already use for a missing API key.
+model DailyReflection {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  date      DateTime @map("date") @db.Date
+  answers   Json
+  aiSummary String?  @map("ai_summary")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, date])
+  @@map("daily_reflections")
+}
+
+// ---------------------------------------------------------------------------
+// Morning/Evening routine domain (Database Design Document §5.1's
+// `routines` — "Morning / evening ritual checklist... type CHECK
+// (morning|evening); checklist JSONB (ordered steps — variable per user);
+// ai_sequenced BOOLEAN"). One row per (user, type) — MORNING and EVENING
+// are two independent configured checklists, not two instances of the same
+// thing. `checklist` stores an ordered array of `{ id, label }` objects
+// (each step gets a stable uuid at creation so completion can be tracked by
+// id even if labels are edited later) — matches the doc's own JSONB
+// rationale for "ordered steps, variable per user" exactly.
+//
+// One real gap versus the doc: it specs the checklist *template* but never
+// mentions day-to-day completion tracking (no date column, no log table) —
+// same class of gap Focus sessions had (a PRD-P0 feature the approved DB
+// design just didn't fully model). RoutineLog below is designed fresh to
+// close that, mirroring HabitLog's own (userId-scoped-via-routine,
+// scheduledDate, @@unique) shape as closely as the two domains' actual
+// needs allow.
+enum RoutineType {
+  MORNING
+  EVENING
+}
+
+model Routine {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  type        RoutineType
+  checklist   Json
+  aiSequenced Boolean     @default(false) @map("ai_sequenced")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  logs RoutineLog[]
+
+  @@unique([userId, type])
+  @@map("routines")
+}
+
+model RoutineLog {
+  id               String   @id @default(uuid())
+  routineId        String   @map("routine_id")
+  routine          Routine  @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  scheduledDate    DateTime @map("scheduled_date") @db.Date
+  completedStepIds Json     @map("completed_step_ids")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([routineId, scheduledDate])
+  @@map("routine_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Focus sessions domain (PRD §7.1 — "Focus sessions / Pomodoro / Deep Work
+// timer," P0; UI/UX Design Document §4's "Focus / Pomodoro timer — Deep work
+// timer, tied to the current scheduled task"). Not modeled in the approved
+// Database Design Document — that document's §4/§5 table inventory never
+// covers this domain even though the PRD lists it as P0, a real gap in the
+// approved docs rather than something intentionally deferred. Designed fresh
+// here, following the same conventions (UUID PK, created_at, userId FK)
+// every other table in this schema already uses. Deliberately simple for a
+// first pass, matching this project's "simple X first" pattern used for
+// every other increment: one session at a time per user (start() refuses a
+// second concurrent one rather than silently ending the first), optionally
+// tied to a task (per the UI/UX doc's "tied to the current scheduled task,"
+// but not required — a bare timer is still useful on its own).
+//
+// Automatic Pomodoro work/break cycling increment: `kind` distinguishes a
+// real focused-work block from a break block. Both are still just rows in
+// this same table — a break is never tied to a task (the client never sends
+// one, and the reasoning below never treats BREAK differently there), and
+// one-active-session-at-a-time still applies across both kinds (you can't
+// run a work timer and a break timer at once, which is exactly the point).
+// Defaults to WORK so every pre-existing row (and every non-Pomodoro session
+// still started today) is unambiguously real focused time, not a break.
+enum FocusSessionKind {
+  WORK
+  BREAK
+}
+
+enum FocusSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model FocusSession {
+  id                     String             @id @default(uuid())
+  userId                 String             @map("user_id")
+  taskId                 String?            @map("task_id")
+  task                   Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  plannedDurationMinutes Int                @map("planned_duration_minutes")
+  kind                   FocusSessionKind   @default(WORK)
+  startedAt              DateTime           @default(now()) @map("started_at")
+  endedAt                DateTime?          @map("ended_at")
+  status                 FocusSessionStatus @default(IN_PROGRESS)
+  createdAt              DateTime           @default(now()) @map("created_at")
+
+  @@index([userId, startedAt])
+  @@map("focus_sessions")
+}
+
+model Tag {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  name   String
+  color  String?
+
+  tasks TaskTag[]
+
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+model TaskTag {
+  taskId String @map("task_id")
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tagId  String @map("tag_id")
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+  @@map("task_tags")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications domain (Database Design Document §4.7) — unlike Focus
+// sessions/Routines/AiRecommendationRun before it, this table *is* actually
+// specced in the approved doc, columns and all; it's the preferences that
+// were the gap (see the comment on User's quiet-hours/channel fields above).
+// One real, deliberate simplification from the approved design: the doc's
+// `scheduled_for`/`status` pair is built around a Temporal-driven dispatcher
+// (Architecture §4.4) that polls for due rows and pushes them out over
+// FCM/APNs/Postmark/Twilio — none of which exist in this project (no
+// Temporal, no push/email/SMS provider integration has been built at any
+// point). This pass keeps the exact same columns and semantics but replaces
+// the dispatcher with the simplest correct in-process equivalent: a
+// notification is created PENDING with `scheduledFor` pushed past quiet
+// hours if needed, and NotificationsService.listRecent (the one and only
+// read path — see that file) only ever returns rows whose scheduledFor has
+// already passed, flipping them to SENT the first time they're actually
+// fetched. "In-app toast delivery when the app is foregrounded" (API Design
+// Document §7) is quite literally the whole delivery mechanism this pass
+// has — see the README for the real-push/email/SMS gap this leaves.
+enum NotificationChannel {
+  PUSH
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id           String              @id @default(uuid())
+  userId       String              @map("user_id")
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String // 'plan_ready' | 'recommendations_ready' this pass — see NotificationsService's callers
+  channel      NotificationChannel @default(PUSH)
+  payload      Json // { title: string, body: string, deeplink: string }
+  scheduledFor DateTime            @map("scheduled_for")
+  sentAt       DateTime?           @map("sent_at")
+  // Not in the approved doc's column list — added so a person can actually
+  // dismiss/acknowledge a notification in the UI; the doc's `status` tracks
+  // dispatch outcome (pending/sent/failed), which is a different axis from
+  // "has the person seen this," so this couldn't just reuse that column
+  // without conflating the two.
+  readAt       DateTime?           @map("read_at")
+  status       NotificationStatus  @default(PENDING)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  // Real notification delivery increment: separate from `status`/`sentAt`
+  // on purpose — those two track "has this become visible in the in-app
+  // list" (flipped by NotificationsService.listRecent, the closest thing
+  // this project had to a dispatcher before this increment). This tracks
+  // a genuinely different thing: has a real web-push and/or email attempt
+  // already been made for this row, so the scheduler's delivery sweep (see
+  // SchedulerService) doesn't re-send the same notification every time it
+  // runs. Null means "not attempted yet" — either brand new, or still
+  // waiting for `scheduledFor` (a quiet-hours deferral) to actually arrive.
+  deliveredAt  DateTime?           @map("delivered_at")
+
+  @@index([userId, status, scheduledFor])
+  @@index([scheduledFor, deliveredAt])
+  @@map("notifications")
+}
+
+// Real notification delivery increment (closes the PRD §7.1 "Smart
+// notifications" P0 row's biggest remaining gap — "delivery" used to mean
+// nothing more than opening the app). One row per browser/device that's
+// granted push permission, following the Web Push Protocol's own shape
+// exactly (endpoint + a p256dh/auth keypair) — this is what
+// `PushManager.subscribe()` returns in the browser, stored verbatim so
+// `web-push` (the server-side library that actually sends the push) can
+// use it later. `endpoint` is unique per subscription (a browser/device
+// pair), not per user, since one person can have this on multiple
+// devices/browsers, each getting its own row and its own push.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
