@@ -63,7 +63,7 @@ export class JournalService {
   }
 
   async create(userId: string, input: CreateJournalEntryInput): Promise<JournalEntry> {
-    let record = await this.prisma.journalEntry.create({
+    const record = await this.prisma.journalEntry.create({
       data: { userId, content: input.content },
     });
 
@@ -75,27 +75,21 @@ export class JournalService {
     // FocusService.complete's own refreshChronotypePattern call): a failed
     // or skipped sentiment score just leaves this one entry's
     // sentimentScore null, exactly as if AI scoring had never been built.
+    //
+    // Deliberately NOT awaited: this entry is already saved and returned to
+    // the person the instant the line above finishes — a real call to a
+    // third-party AI API can take anywhere from under a second to well over
+    // 30 (this is what was actually blocking every "writing an entry..."
+    // e2e run: the Save button stayed disabled and the entry never appeared
+    // for the whole 30s test timeout, because the mutation itself hadn't
+    // resolved yet). Scoring now happens in the background and lands on
+    // this same row a few seconds later, visible on the next poll/reload —
+    // exactly the same "arrives a little after the fact" timing this app
+    // already accepts for chronotype pattern refreshes and other automatic-
+    // learning triggers, just made real here instead of accidentally
+    // blocking the save it's attached to.
     if (this.anthropic.isConfigured()) {
-      try {
-        const { score } = await this.anthropic.analyzeSentiment(input.content);
-        record = await this.prisma.journalEntry.update({
-          where: { id: record.id },
-          data: { sentimentScore: score },
-        });
-      } catch (error) {
-        this.logger.warn(`Journal sentiment scoring failed: ${(error as Error).message}`);
-      }
-
-      // Refreshing the aggregate trend fact only makes sense once this
-      // entry actually has a real score to contribute — if the try block
-      // above failed, there's nothing new for the trend to react to.
-      if (record.sentimentScore !== null) {
-        try {
-          await this.memoryService.refreshJournalSentimentPattern(userId);
-        } catch (error) {
-          this.logger.warn(`Journal sentiment pattern refresh failed: ${(error as Error).message}`);
-        }
-      }
+      void this.scoreSentimentInBackground(userId, record.id, input.content);
     }
 
     // Further auto-replanning triggers increment — a *new* entry only, not
@@ -106,6 +100,31 @@ export class JournalService {
     // today's actually going" from Journal specifically.
     this.eventEmitter.emit('journal.entryCreated', { userId });
     return record as unknown as JournalEntry;
+  }
+
+  private async scoreSentimentInBackground(userId: string, entryId: string, content: string): Promise<void> {
+    let sentimentScore: number | null = null;
+    try {
+      const { score } = await this.anthropic.analyzeSentiment(content);
+      sentimentScore = score;
+      await this.prisma.journalEntry.update({
+        where: { id: entryId },
+        data: { sentimentScore: score },
+      });
+    } catch (error) {
+      this.logger.warn(`Journal sentiment scoring failed: ${(error as Error).message}`);
+      return;
+    }
+
+    // Refreshing the aggregate trend fact only makes sense once this entry
+    // actually has a real score to contribute.
+    if (sentimentScore !== null) {
+      try {
+        await this.memoryService.refreshJournalSentimentPattern(userId);
+      } catch (error) {
+        this.logger.warn(`Journal sentiment pattern refresh failed: ${(error as Error).message}`);
+      }
+    }
   }
 
   async update(userId: string, id: string, input: UpdateJournalEntryInput): Promise<JournalEntry> {

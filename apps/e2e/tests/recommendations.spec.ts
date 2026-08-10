@@ -10,6 +10,16 @@ import { test, expect } from '@playwright/test';
 // generous timeouts, a real AnthropicClient call, not a mocked reply.
 test.describe('AI recommendations', () => {
   test('acting on a recommendation performs a real, committed action — starts a break, books a workout block, or adds a task, depending on what the AI suggests', async ({ page }) => {
+    // Same reasoning as ai-plan-review.spec.ts's own test.setTimeout: this
+    // test's own inner 30s waits for a real AI call are each within
+    // Playwright's default per-test 30s budget on their own, but the test
+    // overall needs multiple sequential steps (get recommendations, act on
+    // one, navigate, verify) to all fit inside it — the outer test timeout
+    // was cutting this off before a genuinely-in-flight AI call and its
+    // follow-on steps could finish, independent of any single expect's own
+    // timeout being generous enough.
+    test.setTimeout(90_000);
+
     await page.goto('/today');
 
     // "Get recommendations" the first time this account sees the card
@@ -69,6 +79,9 @@ test.describe('AI recommendations', () => {
   // customize field renders (a priority select only ever shows for MEAL),
   // then BREAK from WORKOUT by whether a start-time field also renders.
   test('the Customize panel overrides the fixed default — a custom break length, workout time, or task priority, depending on what the AI suggests', async ({ page }) => {
+    // Same reasoning as the test above.
+    test.setTimeout(90_000);
+
     await page.goto('/today');
 
     const getButton = page.getByRole('button', { name: /Get recommendations|Refresh/ });

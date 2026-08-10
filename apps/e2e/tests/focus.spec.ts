@@ -54,7 +54,11 @@ test.describe('Focus sessions', () => {
     await expect(page.getByText('Focusing on')).toBeVisible();
     await expect(page.getByRole('button', { name: /Start \d+-minute focus session/ })).toBeVisible();
     await page.getByRole('button', { name: /Start \d+-minute focus session/ }).click();
-    await expect(page.getByRole('heading', { name: 'Focus session', exact: true })).toBeVisible();
+    // A session linked to a task shows the task's own title as its heading,
+    // not the literal fallback text "Focus session" — that fallback only
+    // ever renders when a session has no linked task (see FocusPage's own
+    // `session.taskTitle ?? 'Focus session'`), which isn't the case here.
+    await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
 
     await page.waitForTimeout(35_000);
     await page.getByRole('button', { name: 'Complete', exact: true }).click();

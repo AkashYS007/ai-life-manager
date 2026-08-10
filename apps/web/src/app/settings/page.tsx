@@ -88,7 +88,23 @@ const CHRONOTYPE_OPTIONS: Array<{ label: string; value: 'EARLY_BIRD' | 'NIGHT_OW
 // chooses here.
 export default function SettingsPage() {
   const router = useRouter();
-  const { data, loading } = useQuery(SETTINGS_QUERY);
+  // Deliberately cache-and-network, not the default cache-first — same
+  // reasoning as POMODORO_SETTINGS_QUERY/REFLECTION_LABELS_QUERY/
+  // GOALS_QUERY (see any of their own comments): the persisted cache
+  // (apollo-client.ts's initCachePersistence) writes to localStorage on a
+  // debounce, not synchronously on every mutation. This page's own
+  // `page.reload()` right after a save is exactly the same class of race a
+  // full navigation to a different page is — the in-memory cache the save
+  // mutation just updated gets torn down and replaced with whatever was
+  // last flushed to localStorage, which can still be the pre-save
+  // snapshot. Confirmed live: a real run showed reminder-hour fields
+  // reading back empty right after reload despite "Saved." having shown
+  // moments earlier. cache-and-network rather than network-only: still
+  // paints instantly from whatever's persisted (the whole reason this app
+  // persists the cache at all), but always also fires a real request and
+  // corrects itself the moment that returns, rather than trusting a
+  // snapshot that might already be stale.
+  const { data, loading } = useQuery(SETTINGS_QUERY, { fetchPolicy: 'cache-and-network' });
   const [displayName, setDisplayName] = useState('');
   const [timezone, setTimezone] = useState('');
   const [timezoneManual, setTimezoneManual] = useState(false);

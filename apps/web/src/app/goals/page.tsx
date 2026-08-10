@@ -246,7 +246,19 @@ function NewGoalForm({ refetchQueries }: { refetchQueries: any[] }) {
 // not just theoretically queryable.
 export default function GoalsPage() {
   const [tab, setTab] = useState<GoalStatus>('ACTIVE');
-  const { data, loading, error } = useQuery(GOALS_QUERY, { variables: { status: tab } });
+  // Deliberately network-only, not the default cache-first — same reasoning
+  // as POMODORO_SETTINGS_QUERY on /focus and REFLECTION_LABELS_QUERY on
+  // /reflection (see either's own comment for the full explanation): the
+  // persisted cache (apollo-client.ts's initCachePersistence) can rehydrate
+  // a snapshot of this exact query+variables pair from an earlier visit in
+  // the same session — e.g. a goal's progress as it looked before a task
+  // linked to it got completed on /today — and cache-first would happily
+  // keep showing that stale snapshot on every later /goals visit forever,
+  // since it never re-checks the server once something's already cached.
+  const { data, loading, error } = useQuery(GOALS_QUERY, {
+    variables: { status: tab },
+    fetchPolicy: 'cache-and-network',
+  });
   const refetchQueries = [{ query: GOALS_QUERY, variables: { status: tab } }];
 
   const goals: GoalRow[] = data?.goals ?? [];

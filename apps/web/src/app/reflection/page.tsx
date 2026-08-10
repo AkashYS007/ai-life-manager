@@ -117,7 +117,15 @@ export default function ReflectionPage() {
   // Configurable daily reflection questions increment — its own small,
   // focused query (see queries.ts's own note on why this isn't folded into
   // SETTINGS_QUERY), fetched alongside the two queries above.
-  const { data: labelsData } = useQuery(REFLECTION_LABELS_QUERY);
+  // Configurable daily reflection questions increment: network-only for the
+  // same reason POMODORO_SETTINGS_QUERY on /focus is (see its own comment) —
+  // the persisted cache (apollo-client.ts's initCachePersistence) writes to
+  // localStorage on a debounce, not synchronously on every mutation, so a
+  // full navigation here right after a Settings save can rehydrate a
+  // snapshot older than that save. cache-first would then show stale
+  // question wording indefinitely instead of the just-saved (or just-
+  // cleared) labels.
+  const { data: labelsData } = useQuery(REFLECTION_LABELS_QUERY, { fetchPolicy: 'cache-and-network' });
   const [editing, setEditing] = useState(false);
 
   const today = data?.todayReflection;

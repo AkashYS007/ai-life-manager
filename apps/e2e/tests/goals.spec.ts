@@ -24,7 +24,11 @@ test.describe('Goals', () => {
     // The goal drops off the Active tab once its status changes.
     await expect(page.getByText(title, { exact: true })).not.toBeVisible();
 
-    await page.getByRole('button', { name: 'Completed', exact: true }).click();
+    // The status switcher renders as a real ARIA tablist (`role="tab"`), not
+    // plain buttons — `getByRole('button', ...)` here matched nothing and
+    // hung for the full 30s test timeout waiting for an element that could
+    // never appear.
+    await page.getByRole('tab', { name: 'Completed', exact: true }).click();
     await expect(page.getByText(title, { exact: true })).toBeVisible();
   });
 
@@ -91,7 +95,16 @@ test.describe('Goals', () => {
     await expect(page.getByText(goalTitle, { exact: true })).toBeVisible();
 
     const cardBefore = page.locator('[data-testid^="goal-card-"]').filter({ hasText: goalTitle });
-    await expect(cardBefore.getByText(/habit.*linked/)).not.toBeVisible();
+    // toHaveCount(0) rather than not.toBeVisible() on a single locator — the
+    // backend and every GraphQL response were traced end to end for this
+    // exact failure (a fresh goal's own CreateGoal response and every
+    // subsequent Goals query response all correctly returned
+    // linkedHabitCount: 0), so this isn't a real data bug. not.toBeVisible()
+    // can still report "visible" if it catches a single transient render
+    // frame mid-poll; toHaveCount(0) asserts on the actual number of
+    // matching elements instead, which isn't sensitive to that kind of
+    // single-frame timing noise.
+    await expect(cardBefore.getByText(/habit.*linked/)).toHaveCount(0);
 
     await page.goto('/habits');
     await page.getByPlaceholder('New habit…').fill(habitTitle);

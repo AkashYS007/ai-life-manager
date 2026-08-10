@@ -120,11 +120,32 @@ export class UsersService {
     },
   ) {
     const user = await this.getOrCreateFromAuth(auth);
+
+    // TimezoneSync.tsx's own silent browser-detection write calls this same
+    // mutation with only `timezone` set (never `timezoneManual`), on every
+    // page load, including /settings itself — racing against a person who's
+    // in the middle of deliberately setting their timezone by hand there. If
+    // that background call's response lands after the person's own manual
+    // save, blindly writing `input.timezone` here would silently overwrite
+    // their choice a few seconds after they made it, even though
+    // timezoneManual itself would still correctly read true. TimezoneSync
+    // already intends to never do this (see its own "backs off entirely
+    // once timezoneManual is set" comment) but only checks that at the
+    // moment its effect fires, using whatever `timezoneManual` value was
+    // true at that point in time — which can't see a manual save that's
+    // still in flight. Enforcing the same rule here, against the real
+    // current value at write time, closes that race regardless of timing:
+    // only an explicit `timezoneManual` in the input (the real Settings
+    // page always sends one) can touch `timezone` once manual mode is
+    // already on.
+    const suppressAutoTimezone =
+      input.timezone !== undefined && input.timezoneManual === undefined && user.timezoneManual === true;
+
     return this.prisma.user.update({
       where: { id: user.id },
       data: {
         displayName: input.displayName,
-        timezone: input.timezone,
+        timezone: suppressAutoTimezone ? undefined : input.timezone,
         timezoneManual: input.timezoneManual,
         chronotype: input.chronotype as any,
         workHoursStart: input.workHoursStart,

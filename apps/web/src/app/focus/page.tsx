@@ -209,7 +209,23 @@ function FocusPageContent() {
 
   const { data: activeData, loading: activeLoading } = useQuery(ACTIVE_FOCUS_SESSION_QUERY);
   const { data: recentData } = useQuery(RECENT_FOCUS_SESSIONS_QUERY, { variables: { first: 5 } });
-  const { data: pomodoroSettingsData } = useQuery(POMODORO_SETTINGS_QUERY);
+  // Configurable Pomodoro durations increment: deliberately network-only,
+  // not the default cache-first. The persisted cache (see apollo-client.ts's
+  // initCachePersistence — on by design, for offline support) is written to
+  // localStorage on a debounce by apollo3-cache-persist, not synchronously
+  // on every mutation. A person who saves new durations on /settings and
+  // then goes straight to /focus triggers a full navigation that tears down
+  // the in-memory cache that mutation just updated and rehydrates whatever
+  // was last flushed to localStorage — which can still be the old values if
+  // that debounced write hadn't landed yet. cache-first would then treat
+  // that stale snapshot as good enough and never re-check the server. This
+  // page's own numbers drive real countdown/forced-break behavior, so
+  // cache-and-network, not network-only: still paints instantly from
+  // whatever's persisted (the whole reason this app persists the cache at
+  // all), but always also fires a real request and corrects itself the
+  // moment that returns, rather than trusting a snapshot that might already
+  // be stale.
+  const { data: pomodoroSettingsData } = useQuery(POMODORO_SETTINGS_QUERY, { fetchPolicy: 'cache-and-network' });
 
   // Configurable Pomodoro durations increment: `null` (never touched
   // Settings) falls back to the classic cadence — the same
