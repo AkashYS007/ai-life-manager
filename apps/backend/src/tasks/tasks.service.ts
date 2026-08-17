@@ -56,6 +56,26 @@ export class TasksService {
   // "what's still open" view: anything not completed/cancelled, most
   // urgent first. The AI scheduling increment replaces this ordering with
   // real schedule placement, not this query.
+  //
+  // Bug fix (found via a real Playwright run, 2026-08-15): the secondary
+  // sort used to be `createdAt: 'asc'` (oldest-within-priority-tier first),
+  // paired with the hard `take` cutoff below. Those two interact badly —
+  // once an account has more open tasks than `take`, a brand-new task at
+  // the same priority as older ones sorts *behind* every one of them and
+  // silently never appears on Today at all, even though it's really there
+  // (confirmed live: this account, after many rounds of real testing,
+  // reliably had 61 open PENDING/IN_PROGRESS tasks against `take`'s default
+  // of 50). `listConnection` below — the Tasks screen's own Open tab —
+  // already establishes this app's real convention for "what's still open,
+  // newest visible first": `createdAt: 'desc'`, with genuine cursor
+  // pagination so nothing's ever lost, just paged. Matching that same
+  // ordering here doesn't fix the *lack* of pagination on this endpoint
+  // (Today intentionally shows a bounded working set, not everything — see
+  // this method's own `take` default), but it does fix the actual bug: a
+  // task someone just added now reliably sorts to the front of its
+  // priority tier instead of being buried behind however many older tasks
+  // happen to exist, so it can never again silently vanish from the one
+  // screen a person expects it to show up on immediately.
   async listOpenForUser(userId: string, take = 50): Promise<Task[]> {
     const records = await this.prisma.task.findMany({
       where: {
@@ -64,7 +84,7 @@ export class TasksService {
         status: { in: ['PENDING', 'IN_PROGRESS'] },
       },
       include: TASK_INCLUDE,
-      orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
       take,
     });
     return records.map(toGraphTask);

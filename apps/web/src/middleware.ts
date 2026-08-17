@@ -19,6 +19,33 @@ const isPublicRoute = createRouteMatcher([
 
 const devPassthrough = (_req: NextRequest) => NextResponse.next();
 
+// RESOLVED (2026-08-17): this middleware itself is correct and was never
+// the problem. What looked like a per-request auth-bypass bug (an
+// unauthenticated visit to a protected route like /today sometimes loading
+// the page instead of redirecting to sign-in) is actually caused entirely
+// client-side, by this app's own service worker (public/sw.js). Its
+// stale-while-revalidate fetch handler caches every same-origin GET
+// response that returns 200 — including full HTML page loads — keyed only
+// by URL, with no awareness of cookies or auth state. Once a route like
+// /today (the default landing page, visited constantly) has ever been
+// cached from a real signed-in visit, the service worker serves that
+// cached copy directly for every future request to that exact URL,
+// regardless of whether the request is authenticated — the request never
+// reaches this server or this middleware at all. Confirmed directly: (1) a
+// brand-new incognito window (empty cache) correctly redirects to sign-in
+// every time; (2) adding a throwaway query string to the URL — a guaranteed
+// cache miss — also correctly redirects; (3) live middleware logging
+// showed isPublicRoute/auth.protect() behaving correctly for every request
+// that actually reached this file. Real impact is low, not zero: the
+// cached HTML itself carries no personal data (this page renders
+// client-side via GraphQL, and the backend's own AuthGuard independently
+// verifies every real data request via Clerk's JWKS regardless of this
+// middleware), but on a shared device a stale cached page shell could
+// briefly render before the network catches up, and the sign-in redirect
+// can't be relied on for a returning visitor with a stale cache. If this
+// needs a real fix, it belongs in sw.js's fetch handler (e.g. skip caching
+// navigation/HTML requests, or don't serve a cached page without
+// revalidating first) — not here.
 const clerkProtected = clerkMiddleware(async (auth, req) => {
   if (!isPublicRoute(req)) {
     // v6 API: `.protect()` lives directly on the `auth` export/param now,

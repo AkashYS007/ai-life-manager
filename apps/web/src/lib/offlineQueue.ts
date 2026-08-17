@@ -126,6 +126,20 @@ export function applyOptimisticCreateTask(input: {
       dueDate: null,
       estimatedDurationMinutes: input.estimatedDurationMinutes ?? null,
       goal: null,
+      // Bug fix (found via live testing, 2026-08-15): TODAY_PLAN_QUERY's
+      // `tasks` selection also asks for `subtasks { id status }` (see
+      // queries.ts) — leaving it out here isn't a harmless omission, it's a
+      // field the query's own shape requires for every task. Writing an
+      // object missing it into the normalized cache makes Apollo unable to
+      // produce a *complete* read of TODAY_PLAN_QUERY afterward, so it
+      // silently fails to notify/re-render the subscribed useQuery — the
+      // task really does land in the cache (confirmed via cache.extract()),
+      // the sync banner even correctly shows "1 change waiting to sync,"
+      // but the Today screen's task list never updates to show it, and the
+      // dev console logs Apollo error #13 ("Missing field 'subtasks'...")
+      // at the exact moment this happens. A brand-new task has no subtasks
+      // yet by construction, so `[]` is the correct value, not a stand-in.
+      subtasks: [],
     };
     apolloClient.cache.writeQuery({
       query: TODAY_PLAN_QUERY,

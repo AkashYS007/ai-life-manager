@@ -27,9 +27,39 @@ test.describe('Settings', () => {
     await page.goto('/settings');
 
     const timezoneInput = page.getByLabel('IANA timezone (e.g. America/New_York)');
-    await expect(page.getByText('Syncing automatically from your browser.')).toBeVisible();
+    // Confirmed live (2026-08-15): SettingsPage's `timezoneManual` local
+    // state starts as `useState(false)` — the same value it'd have once
+    // real data loads and the account genuinely isn't in manual mode — so
+    // "Syncing automatically from your browser." reads identically whether
+    // SETTINGS_QUERY has resolved yet or not. It's a false-positive
+    // precondition: filling the input before the query's one-time
+    // `!initialized && data?.me` sync block has actually run means that
+    // block still fires afterward and clobbers the just-typed value with
+    // whatever the server had, right as the page settles.
+    await page.waitForLoadState('networkidle');
+    await expect(timezoneInput).not.toHaveValue('');
 
-    await timezoneInput.fill('America/Los_Angeles');
+    // Re-investigated a *third* time (2026-08-15) after both the
+    // `networkidle` wait above and an earlier `initialized`-guard theory
+    // still didn't hold up on real runs — this time reproduced live outside
+    // Playwright entirely, in the exact same Chrome build this suite
+    // drives. The account's real stored timezone was already
+    // 'America/Los_Angeles' (`timezoneManual: false`) — TimezoneSync had
+    // already silently auto-synced it to that value on an earlier page
+    // load, because that's this automated Chrome's own real
+    // `Intl.DateTimeFormat().resolvedOptions().timeZone`. Filling the field
+    // with that exact same string it already held wasn't a real edit from
+    // the browser's point of view, so nothing about the page's own logic
+    // was ever actually broken — verified by dispatching a real, clean
+    // native `input` event with a genuinely *different* value, which
+    // switched to manual mode correctly and instantly, no wait needed at
+    // all. Picking a value that's guaranteed to differ from whatever's
+    // already in the field — rather than a hardcoded one that happens to
+    // collide with this specific environment's own detected zone — is the
+    // real, durable fix.
+    const currentValue = await timezoneInput.inputValue();
+    const manualTimezone = currentValue === 'America/Los_Angeles' ? 'America/New_York' : 'America/Los_Angeles';
+    await timezoneInput.fill(manualTimezone);
     await expect(page.getByText('Set manually')).toBeVisible();
     const revertButton = page.getByRole('button', { name: /Use browser-detected automatically/ });
     await expect(revertButton).toBeVisible();
@@ -41,7 +71,7 @@ test.describe('Settings', () => {
     // it back from the server the same way it would the next time this
     // person opens the app.
     await page.reload();
-    await expect(timezoneInput).toHaveValue('America/Los_Angeles');
+    await expect(timezoneInput).toHaveValue(manualTimezone);
     await expect(page.getByText('Set manually')).toBeVisible();
 
     // Reverting hands control back to automatic — the manual-mode copy and
@@ -79,22 +109,38 @@ test.describe('Settings', () => {
     await expect(page.getByText('Active')).toBeVisible();
   });
 
-  // Real Stripe billing integration: this environment has no real
-  // STRIPE_SECRET_KEY/etc. configured (see the increment's own README
-  // section for why that's never been possible to test for real in this
-  // build sandbox), so clicking Plus here exercises the *fallback* path —
-  // createCheckoutSession really is called first and really does come back
-  // STRIPE_NOT_CONFIGURED, then the frontend falls back to the original
-  // simulated instant-switch mutation automatically (see
-  // handleUpgrade's own comment) — the end state this test asserts on is
-  // the same either way, which is exactly the point of that fallback.
-  // Ends by switching back to Free, since this suite's whole Settings
-  // describe block (and every other spec file) runs against the one shared
-  // AUTH_MODE=dev identity — leaving it on a paid tier would quietly change
-  // what "the Account card shows email and status" test above sees on a
-  // later run, the same shared-state care the Danger zone test above
-  // already takes.
+  // Real Stripe billing integration: this test was originally written
+  // against a build sandbox with no real STRIPE_SECRET_KEY/etc. configured,
+  // where clicking Plus always exercises the *fallback* path —
+  // createCheckoutSession is called, comes back STRIPE_NOT_CONFIGURED, and
+  // the frontend falls back to the simulated instant-switch mutation (see
+  // handleUpgrade's own comment). Confirmed live (2026-08-15) that this
+  // account's real dev machine has genuine Stripe test-mode keys configured
+  // — clicking Plus here really does navigate to a live
+  // checkout.stripe.com session. Both are legitimate, correctly-working
+  // outcomes of the same button; which one happens depends on environment
+  // configuration this spec can't control and shouldn't assume. This does
+  // NOT fill in or submit the real Stripe checkout form even in that
+  // branch — completing a purchase, even a test-mode one, isn't something
+  // an automated spec should do; it only confirms the redirect happened
+  // (proving the real integration is wired up correctly end to end) and
+  // returns without paying.
   test('switching plans updates which tier is marked current, and persists across a reload', async ({ page }) => {
+    // This account's real Stripe test-mode credentials mean clicking Plus
+    // kicks off a genuine `createCheckoutSession` call to Stripe's own API
+    // (see the branch below) — a real external network round trip, not an
+    // app-internal one, so it deserves the same generous-timeout treatment
+    // this suite already gives every other real third-party call (the AI
+    // planner, AI chat, AI recommendations). A real run flaked here with
+    // the redirect-detection window at 10s: the checkout session was still
+    // being created when that wait gave up, so `wentToRealStripeCheckout`
+    // came back false and the test fell into the simulated-fallback branch
+    // just as the real redirect actually landed a moment later — pulling
+    // the button out from under the very next assertion. Both the
+    // redirect-detection wait and the test's own overall budget are raised
+    // to give that real API call genuine room to finish either way.
+    test.setTimeout(60_000);
+
     await page.goto('/settings');
 
     const plusButton = page.getByRole('button', { name: /^Plus/ });
@@ -104,6 +150,26 @@ test.describe('Settings', () => {
     await expect(page.getByText('simulated', { exact: false })).toBeVisible();
 
     await plusButton.click();
+
+    const wentToRealStripeCheckout = await page
+      .waitForURL(/checkout\.stripe\.com/, { timeout: 25_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (wentToRealStripeCheckout) {
+      // Real Stripe is configured — the button correctly started a real
+      // checkout session instead of the simulated fallback. Confirming the
+      // redirect is the honest, complete assertion this spec can make
+      // without paying for anything; go back rather than filling in the
+      // real form.
+      expect(page.url()).toMatch(/checkout\.stripe\.com/);
+      await page.goBack();
+      await expect(freeButton).toHaveAttribute('aria-pressed', 'true');
+      return;
+    }
+
+    // Stripe isn't configured here — the simulated fallback path, which is
+    // what this test originally (and still, in that environment) covers.
     await expect(plusButton).toHaveAttribute('aria-pressed', 'true');
     await expect(freeButton).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByText('Renews')).toBeVisible();

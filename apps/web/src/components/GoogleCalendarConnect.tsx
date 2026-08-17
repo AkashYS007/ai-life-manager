@@ -35,7 +35,13 @@ export function GoogleCalendarConnect({
   const connectResult = searchParams.get('googleConnect'); // 'success' | 'error' | null, set by the backend's OAuth callback redirect
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const { data, loading } = useQuery(GOOGLE_CALENDAR_ACCOUNT);
+  // 'cache-and-network', not the default 'cache-first' — same root cause as
+  // CalendarPage's CALENDAR_EVENTS_IN_RANGE query (see that file's comment):
+  // this app persists its Apollo cache to localStorage for offline support,
+  // and a stale cached-disconnected result here would keep showing "Connect
+  // Google Calendar" forever even after a real connection existed, since
+  // 'cache-first' never re-asks the network once it has any cached answer.
+  const { data, loading } = useQuery(GOOGLE_CALENDAR_ACCOUNT, { fetchPolicy: 'cache-and-network' });
   const [startConnection, { loading: starting }] = useMutation(START_GOOGLE_CALENDAR_CONNECTION);
   const [disconnect, { loading: disconnecting }] = useMutation(DISCONNECT_GOOGLE_CALENDAR, {
     refetchQueries: [{ query: GOOGLE_CALENDAR_ACCOUNT }, ...refetchQueries],

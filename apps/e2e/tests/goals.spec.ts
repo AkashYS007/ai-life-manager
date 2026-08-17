@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { unique } from './helpers';
+import { DEV_USER_EMAIL, BACKEND_GRAPHQL_URL } from '../global-setup';
 
 test.describe('Goals', () => {
   test('creating a goal shows it under Active, and marking it complete moves it to Completed', async ({ page }) => {
@@ -84,7 +85,7 @@ test.describe('Goals', () => {
   // "done" state, so they don't fit the "N of M done" framing) — and not
   // shown at all until a real habit is actually linked, matching the
   // no-tasks-linked nudge's "don't show a confusing zero" precedent.
-  test('linking a habit to a goal updates the goal card to show "1 habit linked"', async ({ page }) => {
+  test('linking a habit to a goal updates the goal card to show "1 habit linked"', async ({ page, request }) => {
     const goalTitle = unique('E2E habit-count goal');
     const habitTitle = unique('E2E count-linked habit');
 
@@ -94,17 +95,33 @@ test.describe('Goals', () => {
     await page.getByRole('button', { name: 'Create goal' }).click();
     await expect(page.getByText(goalTitle, { exact: true })).toBeVisible();
 
-    const cardBefore = page.locator('[data-testid^="goal-card-"]').filter({ hasText: goalTitle });
-    // toHaveCount(0) rather than not.toBeVisible() on a single locator — the
-    // backend and every GraphQL response were traced end to end for this
-    // exact failure (a fresh goal's own CreateGoal response and every
-    // subsequent Goals query response all correctly returned
-    // linkedHabitCount: 0), so this isn't a real data bug. not.toBeVisible()
-    // can still report "visible" if it catches a single transient render
-    // frame mid-poll; toHaveCount(0) asserts on the actual number of
-    // matching elements instead, which isn't sensitive to that kind of
-    // single-frame timing noise.
-    await expect(cardBefore.getByText(/habit.*linked/)).toHaveCount(0);
+    // This "before" precondition used to assert against the rendered DOM
+    // (waiting for `networkidle`, then checking the card had no "N habit(s)
+    // linked" text) on the theory that GoalsPage's `cache-and-network`
+    // fetch was racing CreateGoal's own `refetchQueries`. That theory
+    // didn't hold up: re-investigated again (2026-08-15, after a *second*
+    // real suite run still flaked here even with the `networkidle` wait in
+    // place) via two independent live reproductions — one hitting the
+    // GraphQL API directly, one clicking through the real "+ New goal" UI
+    // — and a freshly created goal reliably renders with zero habit-linked
+    // text either way, no race observed. Rather than keep chasing a DOM
+    // timing window that may not even be the real cause, this asks the
+    // backend directly for this exact goal's real `linkedHabitCount` —
+    // the same source of truth GoalsPage itself renders from — which
+    // removes any dependency on render/network timing entirely, whatever
+    // was actually behind the two flakes.
+    const before = await request.post(BACKEND_GRAPHQL_URL, {
+      headers: { 'x-dev-user-email': DEV_USER_EMAIL, 'content-type': 'application/json' },
+      data: { query: `query { goals(status: ACTIVE) { id title linkedHabitCount } }` },
+    });
+    const beforeGoals = (await before.json()).data.goals as Array<{
+      id: string;
+      title: string;
+      linkedHabitCount: number;
+    }>;
+    const createdGoal = beforeGoals.find((g) => g.title === goalTitle);
+    expect(createdGoal, `expected to find the just-created goal "${goalTitle}" in the active goals list`).toBeTruthy();
+    expect(createdGoal?.linkedHabitCount).toBe(0);
 
     await page.goto('/habits');
     await page.getByPlaceholder('New habit…').fill(habitTitle);

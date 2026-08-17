@@ -28,7 +28,9 @@ export function MicrosoftCalendarConnect({
   const connectResult = searchParams.get('microsoftConnect'); // 'success' | 'error' | null, set by the backend's OAuth callback redirect
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const { data, loading } = useQuery(MICROSOFT_CALENDAR_ACCOUNT);
+  // 'cache-and-network' — see GoogleCalendarConnect.tsx's identical comment;
+  // same stale-persisted-cache root cause, same fix, same reasoning.
+  const { data, loading } = useQuery(MICROSOFT_CALENDAR_ACCOUNT, { fetchPolicy: 'cache-and-network' });
   const [startConnection, { loading: starting }] = useMutation(START_MICROSOFT_CALENDAR_CONNECTION);
   const [disconnect, { loading: disconnecting }] = useMutation(DISCONNECT_MICROSOFT_CALENDAR, {
     refetchQueries: [{ query: MICROSOFT_CALENDAR_ACCOUNT }, ...refetchQueries],

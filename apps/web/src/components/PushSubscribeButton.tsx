@@ -88,40 +88,81 @@ export function PushSubscribeButton() {
   async function enable() {
     setError(null);
     try {
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] enable() start, vapidPublicKey present=', !!vapidPublicKey);
       const permission = await Notification.requestPermission();
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] requestPermission resolved:', permission);
       if (permission !== 'granted') {
         setStatus(permission === 'denied' ? 'denied' : 'off');
         return;
       }
 
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] awaiting serviceWorker.ready...');
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        // `as BufferSource` — a newer TypeScript/lib.dom.d.ts pairing than
-        // this file was originally written against tightened
-        // `ArrayBufferLike` (adding resizable-ArrayBuffer members
-        // `SharedArrayBuffer` doesn't have), which makes a plain
-        // `Uint8Array` no longer structurally assignable to
-        // `BufferSource` even though this is exactly what the real Push
-        // API expects and has always accepted at runtime — a typing-only
-        // friction point, not a real bug, so a narrow cast here is
-        // correct rather than papering over anything.
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey as string) as BufferSource,
-      });
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] serviceWorker.ready resolved, scope=', registration.scope, 'active=', !!registration.active);
+
+      // TEMPORARY diagnostic — races the real subscribe() call against a
+      // 10s timer so a hang on the browser's real, out-of-page push
+      // service (which never shows up in a Playwright page-level network
+      // trace — that traffic never goes through the page's own
+      // fetch/XHR/resource layer at all) prints unambiguous evidence
+      // instead of leaving a silent 15s locator timeout as the only clue.
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] calling pushManager.subscribe()...');
+      const subscribeStarted = Date.now();
+      const subscription = await Promise.race([
+        registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          // `as BufferSource` — a newer TypeScript/lib.dom.d.ts pairing than
+          // this file was originally written against tightened
+          // `ArrayBufferLike` (adding resizable-ArrayBuffer members
+          // `SharedArrayBuffer` doesn't have), which makes a plain
+          // `Uint8Array` no longer structurally assignable to
+          // `BufferSource` even though this is exactly what the real Push
+          // API expects and has always accepted at runtime — a typing-only
+          // friction point, not a real bug, so a narrow cast here is
+          // correct rather than papering over anything.
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey as string) as BufferSource,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            // eslint-disable-next-line no-console
+            console.log('[PUSH DEBUG] pushManager.subscribe() still pending after 10s');
+            reject(new Error('[PUSH DEBUG] subscribe() timed out after 10s'));
+          }, 10_000),
+        ),
+      ]);
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] subscribe() resolved after', Date.now() - subscribeStarted, 'ms, endpoint=', subscription.endpoint);
       const json = subscription.toJSON();
 
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] calling registerSubscription mutation...');
       const { data } = await registerSubscription({
         variables: {
           input: { endpoint: json.endpoint, p256dh: json.keys?.p256dh, auth: json.keys?.auth },
         },
       });
+      // eslint-disable-next-line no-console
+      console.log('[PUSH DEBUG] registerSubscription resolved:', data);
 
       if (!data?.registerPushSubscription?.registered) {
         setError("We couldn't enable browser notifications. Try again.");
         return;
       }
       setStatus('on');
-    } catch {
+    } catch (err) {
+      // Logged, not swallowed — a bare catch with no trace of what actually
+      // failed (permission plumbing, the real Push API rejecting the
+      // subscribe call, the registerSubscription mutation itself) is a real
+      // diagnosability gap for anyone debugging this in the field, not just
+      // in tests. The person-facing message stays generic; this is for
+      // whoever's looking at devtools.
+      // eslint-disable-next-line no-console
+      console.error('Failed to enable browser notifications:', err);
       setError("We couldn't enable browser notifications. Try again.");
     }
   }

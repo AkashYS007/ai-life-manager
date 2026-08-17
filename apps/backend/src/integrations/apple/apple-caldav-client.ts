@@ -81,6 +81,18 @@ export class AppleCaldavClient {
     });
     const text = await res.text();
     if (res.status === 401 || res.status === 403) {
+      // TEMPORARY diagnostic — this is the very first live request this
+      // hand-rolled CalDAV client has made to a real Apple server (see the
+      // README's own admission), so a raw 401/403 here is genuinely
+      // ambiguous: wrong appleId/app-specific password vs. a web-only
+      // (no-device-ever-used) Apple Account being rejected by CalDAV auth
+      // itself, vs. some other Apple-side quirk. Print exactly what Apple's
+      // server said so this gets root-caused from real evidence instead of
+      // guessed. Remove once this is resolved.
+      // eslint-disable-next-line no-console
+      console.log(
+        `[APPLE CALDAV DEBUG] ${res.status} from ${url}\nWWW-Authenticate: ${res.headers.get('www-authenticate')}\nBody:\n${text}`,
+      );
       throw new AppleAuthError(res.status, text);
     }
     return { status: res.status, text };

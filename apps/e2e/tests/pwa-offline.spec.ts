@@ -30,6 +30,45 @@ test.describe('Offline app shell', () => {
     await page.goto('/today');
     await expect(page.getByText(/Good (morning|afternoon|evening)/)).toBeVisible();
 
+    // The page that *registers* a service worker is never itself
+    // controlled by it — that's standard browser behavior, not a bug in
+    // sw.js (which does call `clients.claim()` in its own 'activate'
+    // handler, correctly, for every *subsequent* navigation). So this
+    // initial goto's own requests are never intercepted/cached by sw.js's
+    // fetch handler no matter how long this waits. Confirming the SW has
+    // reached 'activated' (same signal the dedicated "service worker
+    // registers" test above already polls for) and then reloading once
+    // more *while still online* is what actually populates the runtime
+    // cache for this exact route — that reload's requests genuinely go
+    // through the now-controlling SW, matching the "first online visit
+    // caches it" behavior sw.js's own comment describes.
+    await expect
+      .poll(async () => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state))
+      .toBe('activated');
+    await page.reload();
+    await expect(page.getByText(/Good (morning|afternoon|evening)/)).toBeVisible();
+
+    // Today's own `useQuery(TODAY_PLAN_QUERY)` (cache-first, the default —
+    // see today/page.tsx) is what actually needs to survive the reload
+    // below with no network: reading straight from Apollo's *persisted*
+    // (localStorage) cache, not the service worker's own runtime cache,
+    // which deliberately never touches the GraphQL POST endpoint at all
+    // (see sw.js's own comment on why). `apollo3-cache-persist` writes to
+    // localStorage on a debounce — 1000ms by default, confirmed directly in
+    // node_modules/apollo3-cache-persist's own Trigger.js — not
+    // synchronously on every cache write, so a reload that fires right on
+    // the heels of the fetch above that just repopulated the cache can
+    // still race a persist that hasn't flushed yet. Every test in this spec
+    // starts from a brand-new, empty browser context (see
+    // playwright.config.ts — no shared storage between tests), so there's
+    // no older snapshot to fall back on if that race is lost: the offline
+    // reload would rebuild Apollo's in-memory cache from nothing, Today's
+    // query would have no data to read and no network to fall back to, and
+    // it would be stuck on "Loading your day…" (or the error state) forever
+    // — exactly the symptom this test was hitting. Giving the debounce
+    // genuine room to fire before ever going offline closes that race.
+    await page.waitForTimeout(1_500);
+
     await context.setOffline(true);
     await page.reload();
 

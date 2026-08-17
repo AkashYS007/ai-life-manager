@@ -2,17 +2,28 @@
 
 import { useState } from 'react';
 import { useMutation } from '@apollo/client';
+import type { DateTime } from 'luxon';
 import { CREATE_CALENDAR_EVENT } from '../lib/queries';
 
 // Plain, honest event capture (matching QuickAddTask's philosophy): title +
 // a start time + a duration in minutes, defaulting to a 30-minute meeting.
 // Natural-language time parsing ("lunch with Sam at 1pm") is an AI-layer
 // feature for a later increment, not something to fake here.
+//
+// Bug fix (2026-08-14): this used to take a plain `Date` and call
+// `setHours()` on it, which sets the hour in the *browser's* local zone.
+// Combined with the CalendarPage bug fixed alongside this one, a "9:00 AM"
+// event typed here could land on the wrong side of a day boundary in the
+// account's actual (stored) timezone. `zonedDay` is a Luxon `DateTime`
+// already anchored to that stored zone (see CalendarPage), so setting the
+// hour/minute on it via Luxon's `.set()` keeps the whole day-bucketing
+// story consistent instead of quietly reintroducing the same class of bug
+// one component over.
 export function QuickAddEvent({
-  day,
+  zonedDay,
   refetchQueries,
 }: {
-  day: Date;
+  zonedDay: DateTime;
   refetchQueries: any[];
 }) {
   const [title, setTitle] = useState('');
@@ -26,12 +37,11 @@ export function QuickAddEvent({
     if (!trimmed) return;
 
     const [hours, minutes] = time.split(':').map(Number);
-    const start = new Date(day);
-    start.setHours(hours, minutes, 0, 0);
-    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+    const start = zonedDay.set({ hour: hours, minute: minutes, second: 0, millisecond: 0 });
+    const end = start.plus({ minutes: durationMinutes });
 
     await createEvent({
-      variables: { title: trimmed, startTime: start.toISOString(), endTime: end.toISOString() },
+      variables: { title: trimmed, startTime: start.toUTC().toISO(), endTime: end.toUTC().toISO() },
     });
     setTitle('');
   }

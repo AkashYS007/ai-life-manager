@@ -23,10 +23,15 @@ const isDevAuth = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev';
 // STRIPE_PRICE_ID_PRO actually charge in the Stripe Dashboard, the same
 // "display copy, not a source of truth" caveat this list already carried
 // before this increment (see the README for the honest note on this).
+// $9.99/$19.99 confirmed 2026-08-17 directly against the real Stripe
+// dashboard's Product catalog (previously read $6/$12 — leftover mock
+// pricing from before real Stripe billing existed at all, never updated
+// when the real integration was wired up; see project state Update 10/14
+// for how this was found and verified, not guessed).
 const TIER_OPTIONS: Array<{ value: 'FREE' | 'PLUS' | 'PRO'; label: string; price: string }> = [
   { value: 'FREE', label: 'Free', price: '$0/mo' },
-  { value: 'PLUS', label: 'Plus', price: '$6/mo' },
-  { value: 'PRO', label: 'Pro', price: '$12/mo' },
+  { value: 'PLUS', label: 'Plus', price: '$9.99/mo' },
+  { value: 'PRO', label: 'Pro', price: '$19.99/mo' },
 ];
 
 // Reads `?checkout=success|cancel` — set by StripeService's own

@@ -279,7 +279,10 @@ export function AiPlanCard({
   const hasPendingEdits = Object.keys(pendingEdits).length > 0 || Object.keys(pendingAdds).length > 0;
 
   return (
-    <div className="mx-4 mb-3 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
+    <div
+      data-testid="daily-plan-card"
+      className="mx-4 mb-3 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4"
+    >
       {error && <p className="mb-2 text-xs text-danger dark:text-danger-dark" role="alert">{error}</p>}
 
       {isPending && latestPlanRun ? (

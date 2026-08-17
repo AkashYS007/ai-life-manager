@@ -53,9 +53,10 @@ export const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-sonnet-5'),
   // Real Stripe billing integration — same graceful-degradation pattern as
-  // Google/Microsoft above, not the looser raw-process.env tier Twilio/
-  // Resend/VAPID use: real money is enough at stake here to argue for the
-  // stricter "all four or none, validated at boot" treatment. Without these,
+  // Google/Microsoft above, but with its own stricter "all four or none,
+  // validated at boot" refine() below, since real money is enough at stake
+  // here to argue for that over the plainer per-var optional() treatment
+  // Twilio/Resend/VAPID get further down. Without these,
   // createCheckoutSession/createBillingPortalSession report
   // STRIPE_NOT_CONFIGURED and Settings falls back to the old simulated
   // instant plan-switch — the server still boots fine either way.
@@ -63,6 +64,34 @@ export const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID_PLUS: z.string().optional(),
   STRIPE_PRICE_ID_PRO: z.string().optional(),
+  // Real notification delivery — Web Push (VAPID), email (Resend), and SMS
+  // (Twilio). Declared here even though WebPushService/EmailService/
+  // SmsService each still read `process.env` directly rather than through
+  // ConfigService (unchanged, low-risk either way) — the reason to declare
+  // them at all is this schema's own validate() being what decides which
+  // keys `assignVariablesToProcess` is even allowed to write to
+  // `process.env` (see ConfigModule's own comment on why it resolves the
+  // repo-root .env explicitly). Prisma Client has its own, fully
+  // independent `.env` auto-loading (a real dotenv.config() side effect,
+  // not this app's own pure dotenv.parse()) that runs later in this file's
+  // own module-import order (ConfigModule is imported before PrismaModule
+  // in app.module.ts) — before this fix, any var *not* declared here was
+  // invisible to this schema's validate() (Zod strips undeclared keys by
+  // default) and therefore never got set by our own correct load of the
+  // real root .env at all, leaving Prisma's later, independent read of a
+  // stale duplicate .env free to silently "win" with whatever placeholder
+  // happened to be sitting in that other file — a real production bug,
+  // found and root-caused this way for VAPID specifically. Fixed here for
+  // good, for every var in this group at once, not just the one that
+  // happened to get caught.
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM_ADDRESS: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
 }).refine(
   (env) => env.AUTH_MODE !== 'clerk' || !!env.CLERK_SECRET_KEY,
   { message: 'CLERK_SECRET_KEY is required when AUTH_MODE=clerk', path: ['CLERK_SECRET_KEY'] },

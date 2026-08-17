@@ -79,6 +79,8 @@ test.describe('Tasks', () => {
   // deterministically pushed past page one no matter what else is on this
   // account, without needing to know or clear out any pre-existing data.
   test('the Open tab pages past its first 20 tasks via Load more', async ({ page }) => {
+    test.setTimeout(60_000);
+
     const prefix = unique('E2E page');
     const titles = Array.from({ length: 21 }, (_, i) => `${prefix} #${i + 1}`);
 
@@ -86,7 +88,15 @@ test.describe('Tasks', () => {
     for (const title of titles) {
       await page.getByPlaceholder('Add a task…').fill(title);
       await page.getByRole('button', { name: 'Add', exact: true }).click();
-      await expect(page.getByText(title, { exact: true })).toBeVisible();
+      // A real run flaked partway through this loop (task #14 of 21) on
+      // the default 5s timeout — plausible on this shared dev-auth account
+      // (see playwright.config.ts's own comment on why there's no per-test
+      // isolation), whose Today page has real accumulated history from
+      // every earlier run and manual QA pass, not a fresh empty account
+      // each mutation re-renders against. 21 real sequential mutations back
+      // to back with no pacing already asks a lot of a 5s-per-step budget;
+      // widened rather than guessing at a specific step's own cause.
+      await expect(page.getByText(title, { exact: true })).toBeVisible({ timeout: 10_000 });
     }
 
     await page.goto('/tasks');

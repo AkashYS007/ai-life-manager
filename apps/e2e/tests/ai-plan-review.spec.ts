@@ -56,12 +56,23 @@ test.describe('AI daily plan review', () => {
     // its own cooldown from inside a shared-account Playwright spec would
     // be a flakier, weaker signal than the deterministic backend assertion
     // already covering the same fact.
-    await expect(page.getByText('Auto-generated', { exact: true })).not.toBeVisible();
+    //
+    // Scoped to the daily plan card specifically (`data-testid`, not a
+    // page-wide text search): WeeklyPlanCard renders its own, unrelated
+    // "Auto-generated" badge right below this one on /today, and this
+    // shared dev-auth account genuinely has an applied weekly plan most of
+    // the time a full suite run reaches this spec — a page-wide
+    // `getByText('Auto-generated')` matches both and fails Playwright's
+    // strict mode (>1 element), even though the thing this assertion
+    // actually cares about (was *this*, the daily plan, manually
+    // requested) is true either way.
+    const dailyPlanCard = page.getByTestId('daily-plan-card');
+    await expect(dailyPlanCard.getByText('Auto-generated', { exact: true })).not.toBeVisible();
     await acceptButton.click();
 
     await expect(
       page.getByText(/Your last plan was applied/, { exact: false }),
     ).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('Auto-generated', { exact: true })).not.toBeVisible();
+    await expect(dailyPlanCard.getByText('Auto-generated', { exact: true })).not.toBeVisible();
   });
 });

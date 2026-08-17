@@ -165,7 +165,15 @@ export function AiRecommendationsCard({
 
   return (
     <div className="mx-4 mb-3 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
-      {error && <p className="mb-2 text-xs text-danger dark:text-danger-dark" role="alert">{error}</p>}
+      {error && (
+        <p
+          data-testid="recommendations-error"
+          className="mb-2 text-xs text-danger dark:text-danger-dark"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
       {confirmation && (
         <p className="mb-2 text-xs text-accent dark:text-accent-dark" role="status">{confirmation}</p>
       )}

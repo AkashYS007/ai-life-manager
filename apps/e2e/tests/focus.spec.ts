@@ -36,6 +36,15 @@ test.describe('Focus sessions', () => {
   // own comment); 35 seconds leaves a safety margin over network/mutation
   // overhead so this doesn't land right on that rounding boundary and flake.
   test('completing a task with a real completed focus session pre-fills its actual-duration prompt', async ({ page }) => {
+    // The comment above already explains *why* this test waits a real 35
+    // seconds; it just never raised Playwright's 30s default per-test
+    // timeout to cover that wait, so a real run always timed out on its own
+    // intentional delay before ever reaching the assertions past it. Same
+    // fix, same reasoning as ai-plan-review.spec.ts's `test.setTimeout` —
+    // margin above the longest deliberate in-test wait, not an arbitrary
+    // bump.
+    test.setTimeout(60_000);
+
     const title = unique('E2E focus-linked task');
 
     await page.goto('/today');

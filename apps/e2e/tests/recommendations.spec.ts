@@ -1,4 +1,36 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+// AiRecommendationsCard renders a real, named error (`role="alert"`,
+// data-testid="recommendations-error") inline instead of navigating
+// whenever actOnRecommendation's mutation comes back with a genuine backend
+// rejection (RecommendationNotFoundError, RecommendationAlreadyHandledError,
+// FocusSessionAlreadyActiveError, or a generic ACT_FAILED) — which
+// otherwise shows up here as a bare "expected URL to change, timed out"
+// failure with no indication of why. Checked right after every commit
+// click, this turns that into a precise, readable failure instead, whatever
+// the actual cause turns out to be.
+//
+// Scoped to the card's own `data-testid`, not a page-wide `getByRole
+// ('alert')`: a first real run of this check caught an empty-string
+// "error" — /today has its *own* top-level `role="alert"` for a failed
+// TODAY_PLAN_QUERY (see today/page.tsx), and acting on a recommendation
+// refetches that exact query as part of committing the action, so a
+// page-wide alert selector isn't guaranteed to be *this* card's error at
+// all. Added the testid to AiRecommendationsCard itself rather than keep
+// guessing at which alert a bare role-based selector actually caught.
+async function failOnActionError(page: Page): Promise<void> {
+  const alertBanner = page.getByTestId('recommendations-error');
+  const sawError = await alertBanner
+    .waitFor({ state: 'visible', timeout: 3_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (sawError) {
+    const message = await alertBanner.textContent();
+    throw new Error(
+      `actOnRecommendation returned an error instead of committing the action: "${message}". If this mentions an already-active focus session, this shared dev-auth account had one left over from an earlier run that the cleanup at the top of this test didn't catch.`,
+    );
+  }
+}
 
 // AI recommendations acting on your behalf increment. Also the first real
 // spec for this card at all — until now it was one of only two screens
@@ -20,6 +52,22 @@ test.describe('AI recommendations', () => {
     // timeout being generous enough.
     test.setTimeout(90_000);
 
+    // A BREAK recommendation's action button starts a real focus session
+    // (see AiRecommendationsCard.handleAct → FocusService.start), which
+    // throws a real, named FocusSessionAlreadyActiveError — surfaced here
+    // as an inline error banner, not a crash — if this shared dev-auth
+    // account (see playwright.config.ts's own comment on why there's no
+    // per-test isolation) already has one left active from an earlier run
+    // that didn't clean up after itself. Same defensive cleanup
+    // focus.spec.ts's own tests already do before starting a new session,
+    // done here too since this spec can just as easily land on the BREAK
+    // branch and hit the exact same guard.
+    await page.goto('/focus');
+    const preExistingCancelButton = page.getByRole('button', { name: 'Cancel', exact: true });
+    if (await preExistingCancelButton.isVisible().catch(() => false)) {
+      await preExistingCancelButton.click();
+    }
+
     await page.goto('/today');
 
     // "Get recommendations" the first time this account sees the card
@@ -39,6 +87,7 @@ test.describe('AI recommendations', () => {
     const recommendationMessage = (await actionButton.locator('xpath=..').locator('.flex-1').textContent())?.trim();
 
     await actionButton.click();
+    await failOnActionError(page);
 
     if (label.includes('Take this break')) {
       // The mutation already committed the real action before this
@@ -82,6 +131,16 @@ test.describe('AI recommendations', () => {
     // Same reasoning as the test above.
     test.setTimeout(90_000);
 
+    // Same defensive cleanup as the test above, and for the exact same
+    // reason: this spec can equally land on the BREAK branch below, which
+    // hits the real FocusSessionAlreadyActiveError guard if a session was
+    // left active by an earlier run on this shared dev-auth account.
+    await page.goto('/focus');
+    const preExistingCancelButton = page.getByRole('button', { name: 'Cancel', exact: true });
+    if (await preExistingCancelButton.isVisible().catch(() => false)) {
+      await preExistingCancelButton.click();
+    }
+
     await page.goto('/today');
 
     const getButton = page.getByRole('button', { name: /Get recommendations|Refresh/ });
@@ -97,6 +156,7 @@ test.describe('AI recommendations', () => {
       // MEAL
       await priorityInput.selectOption('1');
       await page.getByRole('button', { name: /Confirm & add as a task/ }).click();
+      await failOnActionError(page);
       await expect(page.getByText("Added to today's tasks — see it in your list below.")).toBeVisible();
 
       // The new task really was created with the custom Urgent priority,
@@ -115,9 +175,11 @@ test.describe('AI recommendations', () => {
 
     if (isWorkout) {
       await page.getByRole('button', { name: /Confirm & book this workout/ }).click();
+      await failOnActionError(page);
       await expect(page).toHaveURL(/\/calendar/, { timeout: 15_000 });
     } else {
       await page.getByRole('button', { name: /Confirm & take this break/ }).click();
+      await failOnActionError(page);
       await expect(page).toHaveURL(/\/focus/, { timeout: 15_000 });
       // The real active session really was started with the custom
       // 45-minute length, not the fixed 15-minute default.

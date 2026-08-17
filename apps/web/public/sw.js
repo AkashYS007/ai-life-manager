@@ -14,7 +14,20 @@
 // cache a POST response here, which the Cache API can't key sensibly by
 // request body anyway. This service worker's only job is making the app
 // *shell itself* (HTML/JS/CSS/icons) load with no network.
-const CACHE_NAME = 'ailm-shell-v1';
+//
+// v2 (2026-08-17): page navigations (HTML document requests) now use
+// network-first instead of stale-while-revalidate. Root cause of a real
+// bug: this cache is keyed only by URL, with no awareness of cookies or
+// auth state, so a page like /today — cached once from a genuine signed-in
+// visit — was being served straight from the cache for every later
+// request to that exact URL, authenticated or not, without ever reaching
+// the server (or its Clerk middleware). See middleware.ts's comment for
+// the full investigation. Non-navigation requests (JS/CSS/icons/manifest —
+// static, not per-user) keep the original stale-while-revalidate strategy,
+// since instant-from-cache is fine for those. Cache name bumped so the
+// activate handler's existing cleanup (below) evicts any stale v1 entries
+// still holding a bypassed page from before this fix.
+const CACHE_NAME = 'ailm-shell-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -39,12 +52,34 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-while-revalidate: serve the cached copy immediately if one
-  // exists (fast, and works offline), while always trying the network in
-  // the background to keep the cache fresh for next time. A network
-  // failure (offline) is simply swallowed — the cached response (if any)
-  // already answered the request; if there was none, the browser's normal
-  // offline error is what the person sees, same as any uncached page.
+  // Page navigations (the actual document load, e.g. GET /today): always
+  // go to the network first. This is the request Clerk's middleware runs
+  // against, and auth state can change between visits (sign in, sign out,
+  // session expiry) — serving a cached copy without asking the network
+  // would silently skip that check every time, which is exactly the real
+  // bug this fixes. Only fall back to whatever's cached if the network is
+  // genuinely unreachable (offline), which is the actual case this
+  // fallback exists for.
+  const isNavigation = request.mode === 'navigate' || request.destination === 'document';
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const toCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, toCache));
+          }
+          return response;
+        })
+        .catch(() => caches.open(CACHE_NAME).then((cache) => cache.match(request))),
+    );
+    return;
+  }
+
+  // Everything else (JS/CSS/icons/manifest) — static, not per-user, so
+  // stale-while-revalidate is fine: serve the cached copy immediately if
+  // one exists (fast, and works offline), while always trying the network
+  // in the background to keep the cache fresh for next time.
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) =>
       cache.match(request).then((cached) => {
