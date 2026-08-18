@@ -22,7 +22,16 @@ export const metadata: Metadata = {
     ],
     apple: '/icons/apple-touch-icon.png',
   },
-};
+  // Google Search Console domain verification (2026-08-18) — required for
+  // Google OAuth verification of the calendar.events sensitive scope
+  // (Google checks that the Authorized Domain on the OAuth consent screen
+  // is verified in Search Console under the same account). Next.js's
+  // `verification.google` field renders as
+  // <meta name="google-site-verification" content="..." /> in <head>,
+  // which is exactly what Search Console's HTML-tag method checks for.
+  verification: {
+    google: '64GfA56P6RHQaJI8ssk1zWlq2YupI7_ETg1AHlKNT_o',
+  },
 
 export const viewport: Viewport = {
   themeColor: '#4C4CFF',
