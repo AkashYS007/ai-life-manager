@@ -47,6 +47,11 @@ export class BillingResolver {
           errors: [{ code: 'INVALID_TIER', message: 'Free has nothing to check out for — pick Plus or Pro.' }],
         };
       }
+      if (message === 'PAID_TIERS_DISABLED') {
+        return {
+          errors: [{ code: 'PAID_TIERS_DISABLED', message: 'Plus and Pro are temporarily unavailable.' }],
+        };
+      }
       return {
         errors: [{ code: 'CHECKOUT_FAILED', message: "We couldn't start checkout. Try again." }],
       };
