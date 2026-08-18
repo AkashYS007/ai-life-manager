@@ -21,12 +21,23 @@ export function LandingPage() {
       className="min-h-screen bg-background px-5 py-16 dark:bg-background-dark"
     >
       <div className="mx-auto max-w-2xl">
-        <p className="text-xs font-medium uppercase tracking-wide text-accent dark:text-accent-dark">
+        {/* The literal app name comes first, as the actual page heading --
+            not a small kicker label above a different headline. Google's
+            OAuth branding verification flagged "the app name configured for
+            your OAuth consent screen does not match the app name on your
+            home page" against the previous version, where "AI Life Manager"
+            was de-emphasized text above an H1 that said something else.
+            Google's consent screen has the app name configured as exactly
+            "AI Life Manager" (see Cloud Console > Google Auth Platform >
+            Branding > App name) -- this H1 now matches that string exactly,
+            so there's no ambiguity for either a human reviewer or an
+            automated checker. */}
+        <h1 className="text-3xl font-semibold leading-tight text-text-primary dark:text-text-primary-dark sm:text-4xl">
           AI Life Manager
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold leading-tight text-text-primary dark:text-text-primary-dark sm:text-4xl">
-          Your AI Chief of Staff for the whole day.
         </h1>
+        <p className="mt-2 text-lg font-medium text-accent dark:text-accent-dark">
+          Your AI Chief of Staff for the whole day.
+        </p>
         <p className="mt-4 text-base leading-relaxed text-text-secondary dark:text-text-secondary-dark">
           AI Life Manager plans your day around your energy, not just your deadlines. It reminds you to eat, move,
           and rest, prioritizes your open tasks based on how you're actually feeling, and keeps everything in sync
