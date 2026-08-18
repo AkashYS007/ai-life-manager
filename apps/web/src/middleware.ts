@@ -15,6 +15,8 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/api/health(.*)',
+  '/privacy(.*)',
+  '/terms(.*)',
 ]);
 
 const devPassthrough = (_req: NextRequest) => NextResponse.next();
