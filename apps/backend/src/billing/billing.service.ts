@@ -31,6 +31,7 @@ export class BillingService {
 
   async createCheckoutSession(auth: AuthContext, tier: SubscriptionTier): Promise<string> {
     if (tier === SubscriptionTier.FREE) throw new Error('INVALID_TIER');
+    if (this.config.get<boolean>('PAID_TIERS_ENABLED') === false) throw new Error('PAID_TIERS_DISABLED');
     const user = await this.usersService.getOrCreateFromAuth(auth);
     const frontendUrl = this.config.get<string>('FRONTEND_URL')!;
     return this.stripeService.createCheckoutSession({
