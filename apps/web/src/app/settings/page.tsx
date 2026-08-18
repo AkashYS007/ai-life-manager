@@ -34,6 +34,16 @@ const TIER_OPTIONS: Array<{ value: 'FREE' | 'PLUS' | 'PRO'; label: string; price
   { value: 'PRO', label: 'Pro', price: '$19.99/mo' },
 ];
 
+// Temporary demo-safety switch (2026-08-18): mirrors PAID_TIERS_ENABLED in
+// the backend's env.validation.ts. Set to `false` so the plan picker only
+// shows Free — no demo visitor can land on a real Stripe Checkout page or
+// even the simulated instant-upgrade — while a public demo link is being
+// shared. Flip back to `true` (and re-enable the backend flag) once ready
+// to sell anything again; the buttons and the underlying mutations both
+// come back immediately, nothing else needs to change.
+const PAID_TIERS_ENABLED = false;
+const VISIBLE_TIER_OPTIONS = PAID_TIERS_ENABLED ? TIER_OPTIONS : TIER_OPTIONS.filter((o) => o.value === 'FREE');
+
 // Reads `?checkout=success|cancel` — set by StripeService's own
 // success_url/cancel_url after a real Checkout redirect completes (see
 // billing/stripe.service.ts). Split into its own tiny component (rather
@@ -788,7 +798,7 @@ export default function SettingsPage() {
               UsersService.changeSubscriptionTier's own comment describes. */}
           <h3 className="mb-1 mt-3 text-xs font-medium text-text-primary dark:text-text-primary-dark">Plan</h3>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Choose your plan">
-            {TIER_OPTIONS.map((option) => {
+            {VISIBLE_TIER_OPTIONS.map((option) => {
               const isCurrent = data.me.subscription?.tier === option.value;
               const hasStripeCustomer = !!data.me.subscription?.hasStripeCustomer;
               return (
@@ -837,7 +847,13 @@ export default function SettingsPage() {
               {tierError}
             </p>
           )}
-          {!data.me.subscription?.hasStripeCustomer && (
+          {!PAID_TIERS_ENABLED && (
+            <p className="mt-2 text-xs text-text-secondary dark:text-text-secondary-dark">
+              Plus and Pro are temporarily unavailable while we finish setting up billing — everything on Free still
+              works.
+            </p>
+          )}
+          {PAID_TIERS_ENABLED && !data.me.subscription?.hasStripeCustomer && (
             <p className="mt-2 text-xs text-text-secondary dark:text-text-secondary-dark">
               Choosing Plus or Pro starts a real Stripe Checkout if this server has Stripe configured. If it
               doesn&apos;t, switching here is simulated instead — no real payment is processed and no card details
