@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthContext } from '../auth/auth-context';
 
@@ -9,7 +10,10 @@ import { AuthContext } from '../auth/auth-context';
 // and correct even if a webhook is ever missed or delayed.
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   async getOrCreateFromAuth(auth: AuthContext) {
     const existing = await this.prisma.user.findUnique({
@@ -80,6 +84,13 @@ export class UsersService {
   // states a real payment failure or real cancellation flow would produce,
   // neither of which exists in this mock.
   async changeSubscriptionTier(auth: AuthContext, tier: string) {
+    // Temporary demo-safety switch (2026-08-18) — see PAID_TIERS_ENABLED's
+    // own comment in env.validation.ts. Free is always allowed (that's a
+    // downgrade, not a paid-tier switch); PLUS/PRO are rejected while the
+    // flag is off, same as the real Stripe Checkout path.
+    if (tier !== 'FREE' && this.config.get<boolean>('PAID_TIERS_ENABLED') === false) {
+      throw new Error('PAID_TIERS_DISABLED');
+    }
     const user = await this.getOrCreateFromAuth(auth);
     const currentPeriodEnd = tier === 'FREE' ? null : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await this.prisma.subscription.update({
