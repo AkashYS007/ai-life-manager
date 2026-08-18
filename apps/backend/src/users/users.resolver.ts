@@ -76,7 +76,12 @@ export class UsersResolver {
     try {
       const record = await this.usersService.changeSubscriptionTier(auth, tier);
       return { user: record as unknown as User, errors: [] };
-    } catch {
+    } catch (error) {
+      if ((error as Error).message === 'PAID_TIERS_DISABLED') {
+        return {
+          errors: [{ code: 'PAID_TIERS_DISABLED', message: 'Plus and Pro are temporarily unavailable.' }],
+        };
+      }
       return {
         errors: [{ code: 'CHANGE_TIER_FAILED', message: "We couldn't switch your plan. Try again." }],
       };
