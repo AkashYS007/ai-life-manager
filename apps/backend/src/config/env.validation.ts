@@ -64,6 +64,15 @@ export const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ID_PLUS: z.string().optional(),
   STRIPE_PRICE_ID_PRO: z.string().optional(),
+  // Temporary demo-safety switch (2026-08-18): defaults to true (paid
+  // tiers on) so no other environment changes behavior by omission. Set to
+  // "false" to reject any move to PLUS/PRO — both the real Stripe Checkout
+  // path (BillingService.createCheckoutSession) and the no-Stripe-key
+  // simulated fallback (UsersService.changeSubscriptionTier) — so a public
+  // demo link can't land anyone on a real payment page or a fake "upgrade"
+  // before the app is ready to sell anything. Flip back to "true" (or
+  // unset it) to re-enable; no code change needed either direction.
+  PAID_TIERS_ENABLED: z.coerce.boolean().default(true),
   // Real notification delivery — Web Push (VAPID), email (Resend), and SMS
   // (Twilio). Declared here even though WebPushService/EmailService/
   // SmsService each still read `process.env` directly rather than through
