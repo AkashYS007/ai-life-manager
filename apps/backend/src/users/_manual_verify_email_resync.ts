@@ -21,6 +21,11 @@ import { UsersService } from './users.service';
 
 async function main() {
   let failures = 0;
+  // UsersService now also takes a ConfigService (added for the
+  // PAID_TIERS_ENABLED demo-safety switch) — none of the four cases below
+  // exercise changeSubscriptionTier, so a minimal stub that answers `true`
+  // for any key is enough to satisfy the constructor.
+  const configMock: any = { get: () => true };
 
   function assertEqual(actual: unknown, expected: unknown, label: string) {
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -49,7 +54,7 @@ async function main() {
         },
       },
     };
-    const service = new UsersService(prismaMock);
+    const service = new UsersService(prismaMock, configMock);
     const result = await service.getOrCreateFromAuth({ authProviderId: 'dev:a@b.com', email: 'a@b.com' });
     assertEqual(result, existing, 'same email: returns existing unchanged');
     assertEqual(calls, [], 'same email: no create/update calls');
@@ -72,7 +77,7 @@ async function main() {
         },
       },
     };
-    const service = new UsersService(prismaMock);
+    const service = new UsersService(prismaMock, configMock);
     const result = await service.getOrCreateFromAuth({ authProviderId: 'clerk:abc', email: 'new@b.com' });
     assertEqual(result, updated, 'different email: returns resynced row');
     assertEqual(updateArgs?.where, { id: 'u1' }, 'different email: updates by id');
@@ -93,7 +98,7 @@ async function main() {
         },
       },
     };
-    const service = new UsersService(prismaMock);
+    const service = new UsersService(prismaMock, configMock);
     const result = await service.getOrCreateFromAuth({ authProviderId: 'clerk:abc', email: 'new@b.com' });
     assertEqual(result, existing, 'failed resync: falls back to stale existing row without throwing');
   }
@@ -114,7 +119,7 @@ async function main() {
         },
       },
     };
-    const service = new UsersService(prismaMock);
+    const service = new UsersService(prismaMock, configMock);
     const result = await service.getOrCreateFromAuth({ authProviderId: 'dev:new@b.com', email: 'new@b.com' });
     assertEqual(result, created, 'no existing user: creates one');
     assertEqual(createArgs?.data?.email, 'new@b.com', 'no existing user: create call includes email');
