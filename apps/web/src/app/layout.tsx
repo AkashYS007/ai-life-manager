@@ -32,6 +32,7 @@ export const metadata: Metadata = {
   verification: {
     google: '64GfA56P6RHQaJI8ssk1zWlq2YupI7_ETg1AHlKNT_o',
   },
+};
 
 export const viewport: Viewport = {
   themeColor: '#4C4CFF',
