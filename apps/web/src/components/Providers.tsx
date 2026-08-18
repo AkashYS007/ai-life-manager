@@ -2,6 +2,7 @@
 
 import { ApolloProvider } from '@apollo/client';
 import { ClerkProvider, useAuth, useClerk } from '@clerk/nextjs';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   apolloClient,
@@ -15,6 +16,13 @@ import { OnboardingGate } from './OnboardingGate';
 import { SyncManager } from './SyncManager';
 
 const isDevAuth = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev';
+
+// Static marketing pages that carry zero Apollo/session dependency and, per
+// Google's OAuth branding-verification crawler, must return real content in
+// the *initial* server HTML rather than nothing (see the cacheReady gate
+// below). Kept as an explicit allowlist, not a heuristic, so this can never
+// accidentally include an authenticated app route.
+const PUBLIC_PATHS = ['/', '/privacy', '/terms'];
 
 // Bridges Clerk's useAuth().getToken() into the plain Apollo Client module
 // (see lib/apollo-client.ts) — only mounted when a real Clerk session is in
@@ -66,7 +74,28 @@ export function Providers({ children }: { children: React.ReactNode }) {
     initCachePersistence().finally(() => setCacheReady(true));
   }, []);
 
-  if (!cacheReady) return null;
+  // Bug found 2026-08-18 while debugging Google's OAuth branding
+  // verification: useEffect never runs during SSR, so cacheReady is
+  // *always* false on the server, so `if (!cacheReady) return null` used to
+  // mean every single route rendered null in the server-generated HTML —
+  // not just the authenticated app, but the public landing page, /privacy,
+  // /terms too. Real content only ever appeared after client JS mounted and
+  // this effect resolved, which a plain HTTP crawler (Google's branding
+  // checker included) never waits for. That's the actual reason branding
+  // verification kept failing "home page doesn't explain its purpose" and
+  // "app name doesn't match" even after LandingPage.tsx's content was
+  // independently confirmed correct and deployed — the content was real,
+  // it just never reached the response Google's crawler reads.
+  //
+  // Static marketing pages don't touch Apollo or the persisted cache at
+  // all, so they have no reason to wait on cacheReady in the first place —
+  // skip the gate for exactly those paths, unchanged for every other
+  // route. Authenticated app pages keep the original cold-cache protection
+  // exactly as before.
+  const pathname = usePathname();
+  const isPublicPage = PUBLIC_PATHS.includes(pathname ?? '');
+
+  if (!isPublicPage && !cacheReady) return null;
 
   const app = (
     <ApolloProvider client={apolloClient}>
