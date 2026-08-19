@@ -1,0 +1,21 @@
+{
+  "name": "@ailm/mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Native Android/iOS shell for AI Life Manager, built with Capacitor. Wraps the live web app (www.genzylife.com) in a real app shell rather than duplicating the UI, so every feature ships to the app the moment it ships to the web — the native project here exists to unlock real device capabilities (an installable icon, native notification channels, background execution) that a browser tab can't offer.",
+  "scripts": {
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "sync": "cap sync",
+    "sync:android": "cap sync android",
+    "sync:ios": "cap sync ios",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  }
+}
