@@ -56,6 +56,16 @@ export class WebPushService {
     });
   }
 
+  // Exposed so a caller (the sendTestNotification mutation) can tell "sent,
+  // but nobody was listening" apart from "genuinely delivered" — sendToUser
+  // itself intentionally stays silent either way (a best-effort side effect
+  // should never surface *whether* anyone received it back to the action
+  // that triggered it), but a person explicitly asking to test their own
+  // push setup needs exactly that distinction to make sense of the result.
+  async subscriptionCount(userId: string): Promise<number> {
+    return this.prisma.pushSubscription.count({ where: { userId } });
+  }
+
   async unregister(userId: string, endpoint: string): Promise<void> {
     // Scoped by userId as well as endpoint — same "never let one person's
     // request affect another's row" ownership discipline every other
