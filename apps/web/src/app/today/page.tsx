@@ -34,7 +34,13 @@ export default function TodayPage() {
   // Same reasoning again for recommendations (RecommendationsModule).
   const { data: recommendationsData } = useQuery(TODAY_RECOMMENDATIONS_QUERY);
   // And again for the notifications unread badge (NotificationsModule).
-  const { data: unreadData } = useQuery(UNREAD_NOTIFICATION_COUNT_QUERY);
+  // `cache-and-network`, not the default `cache-first` — this app persists
+  // its Apollo cache to localStorage (lib/apollo-client.ts), so without an
+  // explicit override this badge's count freezes at whatever it was the
+  // first time it was ever fetched on this device and never updates again,
+  // even as real unread notifications accumulate server-side. See the
+  // matching fix on the Notifications page itself for the full story.
+  const { data: unreadData } = useQuery(UNREAD_NOTIFICATION_COUNT_QUERY, { fetchPolicy: 'cache-and-network' });
 
   if (loading) {
     return (
