@@ -27,7 +27,21 @@
 // since instant-from-cache is fine for those. Cache name bumped so the
 // activate handler's existing cleanup (below) evicts any stale v1 entries
 // still holding a bypassed page from before this fix.
-const CACHE_NAME = 'ailm-shell-v2';
+// v3 (2026-08-19): cache name bumped again. Root cause of a real bug: the
+// new app logo replaced icon-192.png/icon-512.png/apple-touch-icon.png's
+// *content* at the same URLs (stale-while-revalidate below is keyed only
+// by URL), so any client that had already cached the old icons kept
+// serving them straight from cache — a background revalidation fetch only
+// happens if that URL is actually requested again, which browsers don't
+// reliably do for favicons/manifest icons on their own. Bumping
+// CACHE_NAME forces the activate handler's existing cleanup (below) to
+// evict every old entry, so the new icons are guaranteed to be fetched
+// fresh from the network on next load, regardless of what was cached
+// before. (A device's *home-screen* icon, if the PWA was already
+// installed via "Add to Home Screen," is a separate OS-level snapshot
+// this cache bump can't touch — that only refreshes when Chrome's
+// periodic WebAPK update check runs, or the user removes and re-adds it.)
+const CACHE_NAME = 'ailm-shell-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
