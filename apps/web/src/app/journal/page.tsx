@@ -10,6 +10,7 @@ import {
 } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
 import { OfflineSyncBanner } from '../../components/OfflineSyncBanner';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 import { applyOptimisticJournalEntry, enqueue, isOnline } from '../../lib/offlineQueue';
 
 // "Guided prompts" per PRD §7.3 — a few static conversation-starters you
@@ -210,7 +211,7 @@ function JournalEntryRow({
 }
 
 export default function JournalPage() {
-  const { data, loading, error, fetchMore } = useQuery(JOURNAL_ENTRIES_QUERY);
+  const { data, loading, error, fetchMore, refetch } = useQuery(JOURNAL_ENTRIES_QUERY);
 
   const edges = data?.journalEntries?.edges ?? [];
   const pageInfo = data?.journalEntries?.pageInfo;
@@ -247,11 +248,7 @@ export default function JournalPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your journal. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your journal" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
