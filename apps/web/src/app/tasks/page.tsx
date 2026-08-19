@@ -5,6 +5,7 @@ import { useQuery } from '@apollo/client';
 import Link from 'next/link';
 import { ALL_GOALS_QUERY, CANCELLED_TASKS_QUERY, OPEN_TASKS_QUERY } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 import { TaskEditRow } from '../../components/TaskEditRow';
 
 type Tab = 'OPEN' | 'CANCELLED';
@@ -36,6 +37,7 @@ export default function TasksPage() {
     loading: openLoading,
     error: openError,
     fetchMore: fetchMoreOpen,
+    refetch: refetchOpen,
   } = useQuery(OPEN_TASKS_QUERY, { skip: tab !== 'OPEN' });
 
   const {
@@ -43,6 +45,7 @@ export default function TasksPage() {
     loading: cancelledLoading,
     error: cancelledError,
     fetchMore: fetchMoreCancelled,
+    refetch: refetchCancelled,
   } = useQuery(CANCELLED_TASKS_QUERY, { skip: tab !== 'CANCELLED' });
 
   const { data: goalsData } = useQuery(ALL_GOALS_QUERY, { errorPolicy: 'ignore' });
@@ -52,6 +55,7 @@ export default function TasksPage() {
   const loading = tab === 'OPEN' ? openLoading : cancelledLoading;
   const error = tab === 'OPEN' ? openError : cancelledError;
   const fetchMore = tab === 'OPEN' ? fetchMoreOpen : fetchMoreCancelled;
+  const refetch = tab === 'OPEN' ? refetchOpen : refetchCancelled;
 
   const edges = activeData?.tasks?.edges ?? [];
   const shown = edges.map((e: any) => e.node);
@@ -112,11 +116,7 @@ export default function TasksPage() {
 
       {loading && <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your tasks. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your tasks" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
