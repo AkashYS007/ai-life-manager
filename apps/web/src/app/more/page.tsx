@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { COMPLETED_TASKS_QUERY, REOPEN_TASK, TODAY_PLAN_QUERY } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 // Originally view-only, per that increment's approved scope. The
 // un-completing-a-task increment added the "Undo" button below — the
@@ -70,7 +71,7 @@ function CompletedTaskRow({ id, title, completedAt }: { id: string; title: strin
 }
 
 export default function MorePage() {
-  const { data, loading, error, fetchMore } = useQuery(COMPLETED_TASKS_QUERY);
+  const { data, loading, error, fetchMore, refetch } = useQuery(COMPLETED_TASKS_QUERY);
 
   const edges = data?.tasks?.edges ?? [];
   const pageInfo = data?.tasks?.pageInfo;
@@ -104,11 +105,7 @@ export default function MorePage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your completed tasks. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your completed tasks" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
