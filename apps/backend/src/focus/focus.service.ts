@@ -299,6 +299,18 @@ export class FocusService {
       where: { status: 'IN_PROGRESS' },
       include: { task: true },
     });
+    // Temporary diagnostic increment: this method shipped and deployed
+    // cleanly but produced zero notifications for a real, ~20-minute
+    // overdue session — this per-tick summary (only logged when there's
+    // at least one IN_PROGRESS session, so it stays silent and low-noise
+    // the rest of the time) is here to prove whether the sweep is even
+    // running at all in production, before guessing further. Safe to trim
+    // back down once confirmed working.
+    if (sessions.length > 0) {
+      this.logger.log(
+        `Focus completion sweep: ${sessions.length} in-progress session(s) found`,
+      );
+    }
 
     const now = Date.now();
     for (const session of sessions) {
@@ -311,13 +323,23 @@ export class FocusService {
           where: { userId: session.userId, type },
           select: { id: true },
         });
-        if (alreadyNotified) continue;
+        if (alreadyNotified) {
+          this.logger.log(`Focus session ${session.id} already notified, skipping`);
+          continue;
+        }
 
         const user = await this.prisma.user.findUnique({
           where: { id: session.userId },
-          select: { timezone: true },
+          select: { timezone: true, pushNotificationsEnabled: true },
         });
-        if (!user) continue;
+        if (!user) {
+          this.logger.warn(`Focus session ${session.id}: user ${session.userId} not found`);
+          continue;
+        }
+
+        this.logger.log(
+          `Focus session ${session.id} overdue by ${Math.round((now - plannedEndMs) / 1000)}s — sending completion notification (pushNotificationsEnabled=${user.pushNotificationsEnabled})`,
+        );
 
         const isBreak = session.kind === 'BREAK';
         await this.notificationsService.create(session.userId, user.timezone, type, {
@@ -329,12 +351,15 @@ export class FocusService {
               : 'Nice work! Your focus session is done.',
           deeplink: '/focus',
         });
+
+        this.logger.log(`Focus session ${session.id}: completion notification created`);
       } catch (error) {
         // One session's failure (bad row, transient DB blip) must never
         // block the rest of this tick's sweep — same "isolate the failure,
         // keep going" principle as every other best-effort loop in this app.
         this.logger.warn(
           `Focus session completion push failed for session ${session.id}: ${(error as Error).message}`,
+          (error as Error).stack,
         );
       }
     }
