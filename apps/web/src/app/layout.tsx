@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
+import { InstallPromptBanner } from '../components/InstallPromptBanner';
 import { Providers } from '../components/Providers';
 import { PwaRegister } from '../components/PwaRegister';
 import './globals.css';
@@ -46,6 +47,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             app-wide, same "invisible, no UI of its own" pattern TimezoneSync
             already established for a background client-side effect. */}
         <PwaRegister />
+        {/* Install-prompt increment (2026-08-19): mounted here, outside
+            <Providers>, deliberately — it has no dependency on auth or the
+            Apollo cache, works identically for a signed-out visitor on the
+            public landing page as for a signed-in user on /today, and
+            keeping it out of Providers' subtree means it can never be
+            affected by that component's cacheReady gate (see Providers.tsx
+            for the bug that gate caused when it wrapped everything). */}
+        <InstallPromptBanner />
         <Providers>{children}</Providers>
       </body>
     </html>
