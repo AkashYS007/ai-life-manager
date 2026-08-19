@@ -10,6 +10,7 @@ import { GoogleCalendarConnect } from '../../components/GoogleCalendarConnect';
 import { MicrosoftCalendarConnect } from '../../components/MicrosoftCalendarConnect';
 import { AppleCalendarConnect } from '../../components/AppleCalendarConnect';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 // Timezone-correctness fix (found via live testing, 2026-08-14): this page
 // used to compute "today" with plain `Date` + `setHours(0,0,0,0)`, i.e.
@@ -70,7 +71,7 @@ export default function CalendarPage() {
   // behavior offline support needs, but always fires the network request
   // too and re-renders when that resolves — so a stale cache entry only
   // ever lasts one render instead of indefinitely.
-  const { data, loading, error } = useQuery(CALENDAR_EVENTS_IN_RANGE, {
+  const { data, loading, error, refetch } = useQuery(CALENDAR_EVENTS_IN_RANGE, {
     variables: rangeVariables,
     fetchPolicy: 'cache-and-network',
   });
@@ -132,11 +133,7 @@ export default function CalendarPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load this day. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="this day" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
