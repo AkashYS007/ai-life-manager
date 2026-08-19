@@ -162,26 +162,48 @@ export class NotificationsService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Repeat-delivery fix: batching a same-type row (below) must refresh
+    // what's *shown* — payload, scheduledFor, status — without re-sending a
+    // real push every time it's refreshed. Before this fix, an update also
+    // reset `deliveredAt: null`, and the immediate-delivery call further
+    // down fired unconditionally whenever `scheduledFor <= now` — true on
+    // essentially every re-check of an already-overdue reminder (e.g.
+    // SchedulerService.checkRemindersForUser re-calling create() for the
+    // same still-overdue habit on every 15-minute tick). The result: one
+    // real web push per tick for as long as the habit stayed in its overdue
+    // window (up to 8 in a row), which is exactly the "batched, not spammy"
+    // guarantee this file's own BATCH_WINDOW_HOURS comment promises but
+    // didn't actually deliver on. Now: `deliveredAt` is left untouched on
+    // an update (so an already-delivered row can't be picked up again by
+    // this method or by deliverDueNotifications' sweep), and the immediate
+    // delivery attempt only ever runs for a genuinely new row — a batched
+    // update to an existing unread notification never re-triggers real
+    // delivery, no matter how many times create() is called for it before
+    // it's read or the batch window closes.
     let notificationId: string;
+    let isNewNotification: boolean;
     if (recentSameType) {
       const updated = await this.prisma.notification.update({
         where: { id: recentSameType.id },
-        data: { payload: payload as any, scheduledFor, status: 'PENDING', sentAt: null, deliveredAt: null },
+        data: { payload: payload as any, scheduledFor, status: 'PENDING' },
       });
       notificationId = updated.id;
+      isNewNotification = false;
     } else {
       const created = await this.prisma.notification.create({
         data: { userId, type, channel: 'PUSH', payload: payload as any, scheduledFor, status: 'PENDING' },
       });
       notificationId = created.id;
+      isNewNotification = true;
     }
 
     // Not deferred by quiet hours (scheduledFor is now, not later): attempt
     // real delivery immediately rather than waiting up to 15 minutes for the
     // next sweep. A quiet-hours-deferred row is deliberately left
     // undelivered here — deliverDueNotifications() picks it up the moment
-    // its scheduledFor actually arrives.
-    if (scheduledFor.getTime() <= Date.now()) {
+    // its scheduledFor actually arrives. Gated to new rows only — see the
+    // comment above.
+    if (isNewNotification && scheduledFor.getTime() <= Date.now()) {
       await this.attemptDelivery(userId, notificationId, payload);
     }
   }
