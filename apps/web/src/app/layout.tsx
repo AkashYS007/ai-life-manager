@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { InstallPromptBanner } from '../components/InstallPromptBanner';
 import { Providers } from '../components/Providers';
 import { PwaRegister } from '../components/PwaRegister';
+import { VoiceNotifications } from '../components/VoiceNotifications';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
@@ -47,6 +48,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             app-wide, same "invisible, no UI of its own" pattern TimezoneSync
             already established for a background client-side effect. */}
         <PwaRegister />
+        {/* Voice notifications increment (2026-08-19): mounted here next to
+            PwaRegister, outside <Providers>, same reasoning — it has no
+            auth/Apollo dependency, just a service-worker message listener,
+            so it should be active on every page (signed-in or not) rather
+            than only wherever the Notifications page happens to render. */}
+        <VoiceNotifications />
         {/* Install-prompt increment (2026-08-19): mounted here, outside
             <Providers>, deliberately — it has no dependency on auth or the
             Apollo cache, works identically for a signed-out visitor on the
