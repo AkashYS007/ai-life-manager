@@ -12,6 +12,7 @@ import {
 } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
 import { PushSubscribeButton } from '../../components/PushSubscribeButton';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 interface NotificationRow {
   id: string;
@@ -243,7 +244,7 @@ function PreferencesForm() {
 }
 
 export default function NotificationsPage() {
-  const { data, loading, error } = useQuery(NOTIFICATIONS_QUERY, { variables: { first: 30 } });
+  const { data, loading, error, refetch } = useQuery(NOTIFICATIONS_QUERY, { variables: { first: 30 } });
   const notifications: NotificationRow[] = data?.notifications ?? [];
 
   return (
@@ -259,11 +260,7 @@ export default function NotificationsPage() {
 
       {loading && <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your notifications. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your notifications" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
