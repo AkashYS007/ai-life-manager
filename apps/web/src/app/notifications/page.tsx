@@ -41,7 +41,18 @@ function relativeLabel(iso: string): string {
 function NotificationRowView({ notification }: { notification: NotificationRow }) {
   const [markRead] = useMutation(MARK_NOTIFICATION_READ, {
     variables: { id: notification.id },
-    refetchQueries: [{ query: NOTIFICATIONS_QUERY }, { query: UNREAD_NOTIFICATION_COUNT_QUERY }],
+    // Stale-list fix: a refetchQueries entry with no `variables` refetches
+    // that query with an *empty* variables set — a completely different
+    // cache slot (`notifications({})`) from the one this page actually
+    // reads (`notifications({"first":30})`, from the useQuery below). That
+    // mismatch meant marking a notification read never actually refreshed
+    // what was on screen; it silently populated a cache entry nothing
+    // renders from. Matching the variables here is what makes this
+    // genuinely update the visible list.
+    refetchQueries: [
+      { query: NOTIFICATIONS_QUERY, variables: { first: 30 } },
+      { query: UNREAD_NOTIFICATION_COUNT_QUERY },
+    ],
   });
 
   return (
@@ -244,7 +255,21 @@ function PreferencesForm() {
 }
 
 export default function NotificationsPage() {
-  const { data, loading, error, refetch } = useQuery(NOTIFICATIONS_QUERY, { variables: { first: 30 } });
+  // Stale-cache fix: this app persists the Apollo cache to localStorage
+  // (see lib/apollo-client.ts) so the shell still has data offline — but
+  // combined with the default `cache-first` fetchPolicy, that meant this
+  // exact query+variables pair, once fetched, was served straight from the
+  // (now permanently stale) persisted cache on every later visit, with no
+  // new network request ever firing — no matter how many real
+  // notifications piled up server-side in the meantime. `cache-and-network`
+  // keeps the instant-from-cache render (so this still feels fast and
+  // works offline) while always kicking off a real background refetch too,
+  // so a stale persisted list gets corrected the moment the network is
+  // actually available.
+  const { data, loading, error, refetch } = useQuery(NOTIFICATIONS_QUERY, {
+    variables: { first: 30 },
+    fetchPolicy: 'cache-and-network',
+  });
   const notifications: NotificationRow[] = data?.notifications ?? [];
 
   return (
