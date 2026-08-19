@@ -64,6 +64,23 @@ const DEFAULT_HABIT_REMINDER_MAX_OVERDUE_MINUTES = 120;
 const HABIT_REMINDER_ESCALATION_EXTRA_MINUTES = 240;
 const HABIT_REMINDER_ESCALATION_MAX_OVERDUE_MINUTES = 24 * 60;
 
+// Periodic break/water reminders increment: a genuinely different shape
+// from every other reminder in this file. Routine/reflection/habit
+// reminders all ask "is there one specific thing due today that hasn't
+// happened yet" and fire at most once (plus one escalation) per day.
+// These two instead need to repeat all day long — a nudge to take a break
+// every BREAK_REMINDER_INTERVAL_MINUTES, and to drink water every
+// WATER_REMINDER_INTERVAL_MINUTES — with no "completion" concept at all to
+// check against. Fixed daily window (not tied to quietHours or to the
+// person's own Wake Up/Sleep habit times) — deliberately simple, matching
+// what was actually asked for; NotificationsService.create's own
+// quiet-hours deferral still applies underneath this as a second, separate
+// safety net if the person has quiet hours configured.
+const REMINDER_ACTIVE_START_HOUR = 8;
+const REMINDER_ACTIVE_END_HOUR = 22;
+const BREAK_REMINDER_INTERVAL_MINUTES = 60;
+const WATER_REMINDER_INTERVAL_MINUTES = 30;
+
 interface ReminderSettings {
   morningRoutineHour: number;
   eveningRoutineHour: number;
@@ -289,6 +306,48 @@ export class SchedulerService {
           body: 'Three quick questions to close out your day.',
           deeplink: '/reflection',
         });
+      }
+    }
+
+    // Periodic break/water reminders increment. Only inside the fixed daily
+    // window, and only on the one 15-minute tick nearest each interval
+    // boundary — the cron itself runs every 15 minutes in absolute time, and
+    // real-world UTC offsets are always a multiple of 15 minutes, so a
+    // person's local `now.minute` reliably lands on :00/:15/:30/:45 the same
+    // way withinClockWindow above already assumes for its own 30-minute
+    // window. Each notification's type is keyed by its own day+slot (the
+    // hour for break, the half-hour slot for water) — a fresh, distinct type
+    // every interval — so NotificationsService.create's same-type batching
+    // (meant to collapse repeat calls about the *same* occurrence into one
+    // row) never collapses two different intervals into one, while still
+    // preventing a duplicate send if this same tick is ever re-processed.
+    if (now.hour >= REMINDER_ACTIVE_START_HOUR && now.hour < REMINDER_ACTIVE_END_HOUR) {
+      if (now.minute < 15) {
+        await this.notificationsService.create(
+          userId,
+          timezone,
+          `break_reminder:${now.toFormat('yyyy-LL-dd-HH')}`,
+          {
+            title: 'Time for a quick break',
+            body: "You've been at it for a while — step away for a few minutes.",
+            deeplink: '/today',
+          },
+        );
+      }
+
+      const minutesSinceMidnight = now.hour * 60 + now.minute;
+      const waterSlot = Math.floor(minutesSinceMidnight / WATER_REMINDER_INTERVAL_MINUTES);
+      if (minutesSinceMidnight % WATER_REMINDER_INTERVAL_MINUTES < 15) {
+        await this.notificationsService.create(
+          userId,
+          timezone,
+          `water_reminder:${now.toFormat('yyyy-LL-dd')}-${waterSlot}`,
+          {
+            title: 'Drink some water',
+            body: 'Quick reminder to hydrate.',
+            deeplink: '/today',
+          },
+        );
       }
     }
 
