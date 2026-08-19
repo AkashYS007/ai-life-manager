@@ -5,9 +5,10 @@ import { ALL_GOALS_QUERY, HABITS_QUERY } from '../../lib/queries';
 import { CreateHabitForm } from '../../components/CreateHabitForm';
 import { HabitManageRow } from '../../components/HabitManageRow';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 export default function HabitsPage() {
-  const { data, loading, error } = useQuery(HABITS_QUERY, { variables: { activeOnly: false } });
+  const { data, loading, error, refetch } = useQuery(HABITS_QUERY, { variables: { activeOnly: false } });
   // Habit-edit UI increment: same ALL_GOALS_QUERY (every goal, any status,
   // not just ACTIVE) the Tasks screen's own edit row already uses — an
   // edit form needs to keep showing a habit's *currently* linked goal even
@@ -28,11 +29,7 @@ export default function HabitsPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your habits. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your habits" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
