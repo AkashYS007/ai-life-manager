@@ -101,6 +101,19 @@ self.addEventListener('fetch', (event) => {
 // `{ title, body, deeplink }` shape WebPushService.sendToUser sends
 // (backend/src/push/web-push.service.ts) — kept deliberately identical to
 // the in-app Notification shape so one payload works for both surfaces.
+//
+// Voice notifications increment (2026-08-19): also broadcasts the same
+// payload to every open client via postMessage, alongside showing the OS
+// notification (never instead of it — a foreground tab should still get
+// the visual banner, same as before). This is the only hook available for
+// getting a push event's data into page-context JS at all: the `push`
+// event fires on the service worker, a completely separate execution
+// context from any open tab's own JS (where the Web Speech API actually
+// lives — see VoiceNotifications.tsx), so without this postMessage relay
+// an open tab would have no way to know a push just arrived, let alone
+// read it aloud. Fire-and-forget on purpose: if no client is currently
+// open, matchAll() just resolves to an empty list and this is a no-op —
+// the showNotification() call above is what still reaches a closed app.
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
@@ -112,12 +125,17 @@ self.addEventListener('push', (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      data: { deeplink: payload.deeplink || '/today' },
-    }),
+    Promise.all([
+      self.registration.showNotification(payload.title, {
+        body: payload.body,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        data: { deeplink: payload.deeplink || '/today' },
+      }),
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+        clients.forEach((client) => client.postMessage({ type: 'ailm-push', payload }));
+      }),
+    ]),
   );
 });
 
