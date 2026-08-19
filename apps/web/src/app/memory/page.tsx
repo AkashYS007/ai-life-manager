@@ -5,6 +5,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { MEMORY_FACTS_QUERY, CREATE_MEMORY_FACT } from '../../lib/queries';
 import { MemoryFactRow } from '../../components/MemoryFactRow';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 // "Manual memory first" scope (the approved AI Memory increment): the
 // person directly tells the AI things to remember. No automatic learning,
@@ -12,7 +13,7 @@ import { BottomNav } from '../../components/BottomNav';
 // both read as real context on every request.
 export default function MemoryPage() {
   const [content, setContent] = useState('');
-  const { data, loading, error } = useQuery(MEMORY_FACTS_QUERY);
+  const { data, loading, error, refetch } = useQuery(MEMORY_FACTS_QUERY);
   const [createFact, { loading: creating }] = useMutation(CREATE_MEMORY_FACT, {
     refetchQueries: [{ query: MEMORY_FACTS_QUERY }],
   });
@@ -58,11 +59,7 @@ export default function MemoryPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your memory. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your memory" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
