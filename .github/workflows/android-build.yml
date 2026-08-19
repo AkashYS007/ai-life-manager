@@ -1,0 +1,77 @@
+name: Build Android APK
+
+# Native app shell increment. The Android Gradle build needs to resolve the
+# Android SDK, the Android Gradle Plugin, and AndroidX from Google's Maven
+# repo (maven.google.com / dl.google.com) — none of which are reachable from
+# the sandboxed environment this repo is usually edited from (its outbound
+# network is allowlisted to a short list of package registries, and Google's
+# Android infrastructure isn't on it). GitHub's own hosted runners have full
+# network access *and* come with the Android SDK preinstalled, so the actual
+# compile happens here instead, on every push that touches the mobile
+# project, or on demand via the Actions tab's "Run workflow" button.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/android-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install mobile project dependencies
+        run: npm install
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Deliberately not committed to the repo (see apps/mobile/README.md) —
+      # regenerated fresh on every build from capacitor.config.ts, so there's
+      # never a stale native project drifting from that config, and this repo
+      # never has to carry the ~50 boilerplate files a Capacitor Android
+      # project scaffolds (gradle wrapper jar, default resources, etc.).
+      - name: Scaffold native Android project
+        run: npx cap add android
+
+      - name: Apply real app icons
+        run: |
+          pip install --quiet Pillow
+          python3 scripts/apply_icons.py
+
+      # `webDir` in capacitor.config.ts points at `www/` even though this
+      # app runs in remote-URL mode and never actually serves anything from
+      # it — `cap sync` still expects the directory to exist before it will
+      # copy config into the native project.
+      - name: Create placeholder web asset dir
+        run: mkdir -p www && echo '<html></html>' > www/index.html
+
+      - name: Sync Capacitor config into native project
+        run: npx cap sync android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-life-manager-debug-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
