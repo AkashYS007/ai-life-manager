@@ -114,7 +114,7 @@ export class FocusService {
   // session that isn't IN_PROGRESS (already completed/cancelled) rather
   // than silently re-writing history, same "only valid transitions" guard
   // TasksService.reopen uses.
-  private async end(userId: string, id: string, status: 'COMPLETED' | 'CANCELLED'): Promise<FocusSession> {
+  private async end(userId: string, id: string, status: 'COMPLETED' | 'CANCELLED'): Promise<FocusSession> { 
     const existing = await this.requireOwnedSession(userId, id);
     if (existing.status !== 'IN_PROGRESS') {
       throw new FocusSessionNotActiveError();
@@ -295,6 +295,18 @@ export class FocusService {
   // correctly does for the recurring habit/routine reminders above.
   @Cron('*/1 * * * *')
   async checkFocusSessionCompletions(): Promise<void> {
+    // Temporary diagnostic increment (step 2): the per-tick summary logged
+    // further down never appeared in production even after 10+ minutes with
+    // a genuine, confirmed-overdue IN_PROGRESS session sitting in the DB —
+    // which means either this method is never being invoked by the
+    // scheduler at all, or it's invoked but hangs/throws inside the
+    // `findMany` below before reaching any log line. This unconditional,
+    // no-DB-dependency entry log runs before anything else so it can tell
+    // the two apart: if THIS never appears, the cron itself isn't firing;
+    // if this appears but the summary below doesn't, the DB call is the
+    // problem. Safe to trim back down once confirmed working.
+    this.logger.log('checkFocusSessionCompletions: tick');
+
     const sessions = await this.prisma.focusSession.findMany({
       where: { status: 'IN_PROGRESS' },
       include: { task: true },
