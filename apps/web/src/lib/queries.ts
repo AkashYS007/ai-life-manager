@@ -1796,6 +1796,23 @@ export const UNREGISTER_PUSH_SUBSCRIPTION = gql`
   }
 `;
 
+// On-demand diagnostic increment (2026-08-19) — see push.resolver.ts's own
+// comment on sendTestNotification for why this bypasses the normal
+// reminder pipeline entirely (quiet hours, preferences, batching) and never
+// touches Notification history.
+export const SEND_TEST_NOTIFICATION = gql`
+  mutation SendTestNotification {
+    sendTestNotification {
+      sent
+      subscriptionCount
+      errors {
+        code
+        message
+      }
+    }
+  }
+`;
+
 // Diagnostic onboarding increment (PRD §7.1 / UI/UX Design Document §5,
 // §10). ME_ONBOARDING_QUERY powers OnboardingGate's global redirect check —
 // deliberately its own small query (not folded into ME_TIMEZONE_QUERY)
