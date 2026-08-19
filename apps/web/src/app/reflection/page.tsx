@@ -9,6 +9,7 @@ import {
   REFLECTION_LABELS_QUERY,
 } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -112,7 +113,7 @@ function ReflectionForm({
 }
 
 export default function ReflectionPage() {
-  const { data, loading, error } = useQuery(TODAY_REFLECTION_QUERY);
+  const { data, loading, error, refetch } = useQuery(TODAY_REFLECTION_QUERY);
   const { data: recentData } = useQuery(RECENT_REFLECTIONS_QUERY, { variables: { first: 14 } });
   // Configurable daily reflection questions increment — its own small,
   // focused query (see queries.ts's own note on why this isn't folded into
@@ -148,11 +149,7 @@ export default function ReflectionPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load today&apos;s reflection. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="today's reflection" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <>
