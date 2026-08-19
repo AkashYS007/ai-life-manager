@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@apollo/client';
 import { ANALYTICS_SUMMARY_QUERY } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 import { TrendChart } from '../../components/TrendChart';
 
 const WINDOW_OPTIONS = [
@@ -119,7 +120,7 @@ function StreakCard({
 // logged, not here).
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
-  const { data, loading, error } = useQuery(ANALYTICS_SUMMARY_QUERY, { variables: { days } });
+  const { data, loading, error, refetch } = useQuery(ANALYTICS_SUMMARY_QUERY, { variables: { days } });
 
   const summary = data?.analyticsSummary;
   const dailyMoodEnergy: DailyMoodEnergy[] = summary?.dailyMoodEnergy ?? [];
@@ -174,11 +175,7 @@ export default function AnalyticsPage() {
 
       {loading && <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your insights. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your insights" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-3">
