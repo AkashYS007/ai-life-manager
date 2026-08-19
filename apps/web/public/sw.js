@@ -144,6 +144,22 @@ self.addEventListener('push', (event) => {
         body: payload.body,
         icon: '/icons/icon-192.png',
         badge: '/icons/icon-192.png',
+        // Alarm-like delivery increment: a genuine alarm (loud sound that
+        // overrides silent/DND, rings until dismissed) needs OS-level alarm
+        // permissions — AlarmManager + a full-screen intent on Android, the
+        // kind only a native app can request. A web push notification has
+        // no access to that channel at all, no matter what's set here; this
+        // is the closest a PWA can get. `vibrate` asks the device to buzz
+        // in this on/off pattern (already not `silent: true`, so the
+        // device's normal notification sound was already playing — this
+        // adds the physical buzz most people actually notice break/water
+        // reminders by). `requireInteraction: true` asks supporting
+        // platforms (mainly desktop Chrome) to keep the notification on
+        // screen until the person dismisses it instead of auto-hiding after
+        // a few seconds — Android's own notification shade already behaves
+        // this way regardless, so this mostly helps desktop users.
+        vibrate: [200, 100, 200, 100, 200],
+        requireInteraction: true,
         data: { deeplink: payload.deeplink || '/today' },
       }),
       self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
