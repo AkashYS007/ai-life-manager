@@ -64,7 +64,7 @@ export default function TodayPage() {
           not in the bottom nav on purpose, since the UI/UX Design
           Document's mobile navigation (§4) doesn't list Focus as a tab;
           this keeps it reachable without adding an eighth nav item. */}
-      <div className="flex gap-3 px-5 pb-1">
+      <div className="flex flex-wrap gap-x-3 gap-y-1.5 px-5 pb-1">
         <Link href="/focus" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
           Start a focus session →
         </Link>
