@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { REGISTER_PUSH_SUBSCRIPTION, UNREGISTER_PUSH_SUBSCRIPTION, VAPID_PUBLIC_KEY_QUERY } from '../lib/queries';
+import {
+  REGISTER_PUSH_SUBSCRIPTION,
+  SEND_TEST_NOTIFICATION,
+  UNREGISTER_PUSH_SUBSCRIPTION,
+  VAPID_PUBLIC_KEY_QUERY,
+} from '../lib/queries';
 
 // Real notification delivery increment. The `urlBase64ToUint8Array` step is
 // unavoidable boilerplate every Web Push implementation needs — the Push
@@ -26,9 +31,11 @@ type Status = 'unknown' | 'unsupported' | 'unconfigured' | 'off' | 'on' | 'denie
 export function PushSubscribeButton() {
   const [status, setStatus] = useState<Status>('unknown');
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
   const { data: vapidData } = useQuery(VAPID_PUBLIC_KEY_QUERY);
   const [registerSubscription, { loading: registering }] = useMutation(REGISTER_PUSH_SUBSCRIPTION);
   const [unregisterSubscription, { loading: unregistering }] = useMutation(UNREGISTER_PUSH_SUBSCRIPTION);
+  const [sendTestNotification, { loading: sendingTest }] = useMutation(SEND_TEST_NOTIFICATION);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +174,29 @@ export function PushSubscribeButton() {
     }
   }
 
+  // On-demand diagnostic increment (2026-08-19, explicit user request): lets
+  // someone confirm right now whether a real push actually reaches *this*
+  // device, instead of waiting for the next naturally-scheduled reminder to
+  // find out. See push.resolver.ts's sendTestNotification for why this is
+  // a separate, side-effect-free mutation rather than reusing any real
+  // reminder path.
+  async function sendTest() {
+    setTestResult(null);
+    try {
+      const { data } = await sendTestNotification();
+      const result = data?.sendTestNotification;
+      if (result?.errors?.length) {
+        setTestResult(result.errors[0].message);
+      } else if (!result?.sent) {
+        setTestResult("No subscription found for this device — try turning notifications off and on again above.");
+      } else {
+        setTestResult('Test notification sent — check for it now.');
+      }
+    } catch {
+      setTestResult("We couldn't send a test notification. Try again.");
+    }
+  }
+
   async function disable() {
     setError(null);
     try {
@@ -185,7 +215,7 @@ export function PushSubscribeButton() {
   const busy = registering || unregistering;
 
   return (
-    <div className="mb-3 flex items-center gap-3">
+    <div className="mb-3 flex flex-wrap items-center gap-3">
       <button
         onClick={status === 'on' ? disable : enable}
         disabled={busy}
@@ -193,7 +223,24 @@ export function PushSubscribeButton() {
       >
         {busy ? 'Working…' : status === 'on' ? 'Turn off browser notifications' : 'Turn on browser notifications'}
       </button>
+      {/* Only shown once this device is actually subscribed — testing
+          before that would just re-report the same "nothing registered"
+          state the main button above already communicates. */}
+      {status === 'on' && (
+        <button
+          onClick={sendTest}
+          disabled={sendingTest}
+          className="rounded-control border border-border dark:border-border-dark px-3 py-1.5 text-xs font-medium text-text-primary dark:text-text-primary-dark disabled:opacity-50"
+        >
+          {sendingTest ? 'Sending…' : 'Send test notification'}
+        </button>
+      )}
       {error && <span className="text-xs text-danger dark:text-danger-dark" role="alert">{error}</span>}
+      {testResult && (
+        <span className="text-xs text-text-secondary dark:text-text-secondary-dark" role="status">
+          {testResult}
+        </span>
+      )}
     </div>
   );
 }
