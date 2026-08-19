@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { DELETE_ROUTINE, SET_ROUTINE, TODAY_ROUTINES_QUERY } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 interface RoutineStep {
   id: string;
@@ -142,7 +143,7 @@ function RoutineEditor({ type, existing }: { type: 'MORNING' | 'EVENING'; existi
 }
 
 export default function RoutinesPage() {
-  const { data, loading, error } = useQuery(TODAY_ROUTINES_QUERY);
+  const { data, loading, error, refetch } = useQuery(TODAY_ROUTINES_QUERY);
 
   const routines: RoutineData[] = data?.todayRoutines ?? [];
   const morning = routines.find((r) => r.type === 'MORNING');
@@ -159,11 +160,7 @@ export default function RoutinesPage() {
 
       {loading && <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your routines. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your routines" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <>
