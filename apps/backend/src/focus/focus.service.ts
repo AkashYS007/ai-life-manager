@@ -1,7 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { FocusSession } from './models/focus-session.model';
 import { StartFocusSessionInput } from './dto/start-focus-session.input';
 
@@ -44,6 +46,9 @@ export class FocusService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly memoryService: MemoryService,
+    // Real push-based focus session completion alerts increment — see
+    // checkFocusSessionCompletions below for the full reasoning.
+    private readonly notificationsService: NotificationsService,
     // Same event-based decoupling every other auto-replan trigger source
     // uses (see planner.service.ts) — PlannerModule doesn't import
     // FocusModule today, so there's no actual circularity risk here, but
@@ -237,5 +242,101 @@ export class FocusService {
       where: { userId, status: 'COMPLETED', kind: 'WORK', startedAt: { gte: fromDate, lte: toDate } },
       select: { startedAt: true, endedAt: true },
     }) as unknown as Promise<Array<{ startedAt: Date; endedAt: Date }>>;
+  }
+
+  // Real push-based focus session completion alerts increment: the client's
+  // own on-screen/browser-Notification signal (FocusPageContent's
+  // notifyTransition, in apps/web/src/app/focus/page.tsx) only fires while
+  // that tab stays open and in the foreground for the entire planned
+  // duration — a locked phone screen or a backgrounded tab freezes the
+  // countdown's setInterval entirely, so nothing ever fires, and a closed
+  // tab means nothing ever will. This closes that gap the same way the
+  // morning/evening routine and reflection reminders do (see
+  // SchedulerService.checkRemindersForUser): a scheduled sweep that doesn't
+  // depend on any tab being open, delivered through the same real web-push
+  // pipeline (NotificationsService.create -> WebPushService) already
+  // proven working for plan/recommendation notifications.
+  //
+  // Deliberately kept to exactly this scope — a real push when a session's
+  // planned time is up — not the larger "move the whole Pomodoro
+  // work/break chain server-side" change. `pomodoroMode` and
+  // `cyclesCompleted` stay client-only state exactly as before (see the
+  // Automatic Pomodoro work/break cycling increment's comments in
+  // page.tsx); this only ever tells the person their timer is up, it never
+  // starts the next block itself, so there's no new persisted
+  // "is this person mid-Pomodoro-chain" state to get out of sync.
+  //
+  // Runs every minute, not on SchedulerService's shared 15-minute cadence —
+  // a focus session can be as short as a 5-minute break, and a nudge that
+  // arrives up to 15 minutes late defeats the entire point of "tell me the
+  // moment this block ends." Kept self-contained here rather than moved
+  // into SchedulerService, the same "a service can own its own @Cron"
+  // precedent NotificationsService.deliverDueNotifications already set,
+  // since this only ever touches focus session state this service already
+  // owns.
+  //
+  // Every IN_PROGRESS session is fetched with no per-user pre-filter,
+  // unlike checkReminders' per-user sweep — at any given moment across the
+  // whole app there are only ever as many IN_PROGRESS focus sessions as
+  // there are people actively mid-timer right now, a tiny fraction of the
+  // user base, not "every user, every tick" the way the 15-minute reminder
+  // sweep genuinely is.
+  //
+  // Dedup is a direct existence check against the notifications table for
+  // `focus_session_complete:${session.id}` — not create()'s own internal
+  // batching (same-type-and-unread-within-12-hours), which exists to
+  // refresh a still-relevant *recurring* notification, not to gate a
+  // one-time event. A given focus session only ever crosses its planned
+  // end once, so "has any notification for this exact session id ever been
+  // sent, read or not" is the correct, permanent check — relying on
+  // create()'s own unread-window batching instead would re-trigger a brand
+  // new real push on every later tick until the person actually opened the
+  // app and read it, not just silently refresh one in-app row the way it
+  // correctly does for the recurring habit/routine reminders above.
+  @Cron('*/1 * * * *')
+  async checkFocusSessionCompletions(): Promise<void> {
+    const sessions = await this.prisma.focusSession.findMany({
+      where: { status: 'IN_PROGRESS' },
+      include: { task: true },
+    });
+
+    const now = Date.now();
+    for (const session of sessions) {
+      const plannedEndMs = session.startedAt.getTime() + session.plannedDurationMinutes * 60 * 1000;
+      if (now < plannedEndMs) continue;
+
+      try {
+        const type = `focus_session_complete:${session.id}`;
+        const alreadyNotified = await this.prisma.notification.findFirst({
+          where: { userId: session.userId, type },
+          select: { id: true },
+        });
+        if (alreadyNotified) continue;
+
+        const user = await this.prisma.user.findUnique({
+          where: { id: session.userId },
+          select: { timezone: true },
+        });
+        if (!user) continue;
+
+        const isBreak = session.kind === 'BREAK';
+        await this.notificationsService.create(session.userId, user.timezone, type, {
+          title: isBreak ? 'Break complete' : 'Focus session complete',
+          body: isBreak
+            ? "Your break just ended — ready to get back to it?"
+            : session.task?.title
+              ? `Nice work! Your focus session on "${session.task.title}" is done.`
+              : 'Nice work! Your focus session is done.',
+          deeplink: '/focus',
+        });
+      } catch (error) {
+        // One session's failure (bad row, transient DB blip) must never
+        // block the rest of this tick's sweep — same "isolate the failure,
+        // keep going" principle as every other best-effort loop in this app.
+        this.logger.warn(
+          `Focus session completion push failed for session ${session.id}: ${(error as Error).message}`,
+        );
+      }
+    }
   }
 }
