@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_GOAL, GOALS_QUERY, UPDATE_GOAL } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 type GoalStatus = 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
 
@@ -255,7 +256,7 @@ export default function GoalsPage() {
   // linked to it got completed on /today — and cache-first would happily
   // keep showing that stale snapshot on every later /goals visit forever,
   // since it never re-checks the server once something's already cached.
-  const { data, loading, error } = useQuery(GOALS_QUERY, {
+  const { data, loading, error, refetch } = useQuery(GOALS_QUERY, {
     variables: { status: tab },
     fetchPolicy: 'cache-and-network',
   });
@@ -298,11 +299,7 @@ export default function GoalsPage() {
 
       {loading && <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>}
 
-      {error && (
-        <p className="mx-4 mb-3 text-sm text-danger dark:text-danger-dark" role="alert">
-          Couldn&apos;t load your goals. Check that the backend is running.
-        </p>
-      )}
+      {error && <QueryErrorNotice error={error} what="your goals" onRetry={() => refetch()} />}
 
       {!loading && !error && (
         <div className="mx-4 mb-3 flex flex-col gap-2">
