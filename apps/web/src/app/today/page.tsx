@@ -20,10 +20,11 @@ import { AiRecommendationsCard } from '../../components/AiRecommendationsCard';
 import { HabitRow } from '../../components/HabitRow';
 import { RoutineChecklist } from '../../components/RoutineChecklist';
 import { OfflineSyncBanner } from '../../components/OfflineSyncBanner';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 import Link from 'next/link';
 
 export default function TodayPage() {
-  const { data, loading, error } = useQuery(TODAY_PLAN_QUERY);
+  const { data, loading, error, refetch } = useQuery(TODAY_PLAN_QUERY);
   // Separate query/module from the plan (RoutinesModule, not TodayModule —
   // see routines.module.ts), so a routines fetch failure never blocks the
   // rest of Today from rendering; errors are swallowed here on purpose,
@@ -45,9 +46,8 @@ export default function TodayPage() {
 
   if (error) {
     return (
-      <main id="main-content" role="alert" className="mx-auto max-w-md py-10 text-center text-sm text-danger dark:text-danger-dark">
-        Couldn&apos;t load your day. Check that the backend is running on{' '}
-        {process.env.NEXT_PUBLIC_API_URL}.
+      <main id="main-content" className="mx-auto max-w-md py-10">
+        <QueryErrorNotice error={error} what="your day" onRetry={() => refetch()} />
       </main>
     );
   }
