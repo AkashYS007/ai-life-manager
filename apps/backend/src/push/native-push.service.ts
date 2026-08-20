@@ -83,21 +83,32 @@ export class NativePushService {
     await Promise.all(
       tokens.map(async (row) => {
         try {
-          // A data-only message (no top-level `notification` key) rather
-          // than a notification message — a notification message is
-          // displayed and consumed by the OS automatically while the app is
-          // backgrounded/killed, but never reaches the app's own JS at all
-          // in that state, which is exactly the gap this increment exists
-          // to close (see NativePushRegistration.tsx's foreground listener
-          // and the README note on the still-unbuilt background-voice
-          // follow-up, which will need this same data-only shape to get a
-          // chance to run any code on receipt). The native Capacitor Push
-          // Notifications plugin still surfaces a system notification for a
-          // data-only message via its own local-notification fallback when
-          // the payload carries title/body, so this doesn't trade away
-          // visible delivery to gain background wake-up.
+          // Bug fix (2026-08-20, confirmed via a live manual FCM send from
+          // the Railway console): this used to omit the top-level
+          // `notification` key on the theory that the native Capacitor Push
+          // Notifications plugin's own local-notification fallback would
+          // still surface a system notification for a data-only message
+          // (see git history for the original comment's full reasoning).
+          // That fallback only runs inside the app's own JS — which never
+          // gets a chance to execute once Android has actually killed the
+          // WebView process (confirmed happens well within a 5-minute
+          // locked-screen test), so on a real phone, in the real "reminder
+          // fires while the app isn't open" case this feature exists for,
+          // nothing ever displayed. A manual admin.messaging().send() with
+          // a real top-level `notification` block, sent to this exact same
+          // registered token, displayed correctly with sound — same
+          // WhatsApp/Instagram-style behavior the person asked to match —
+          // proving that's what was missing. Setting both `notification`
+          // (so the OS auto-displays it, with sound/vibration/banner, the
+          // moment the app is backgrounded or fully killed — no app JS
+          // required to run at all) and `data` (still delivered alongside
+          // it to any listener that IS running, e.g. a foregrounded app,
+          // for deeplink navigation on tap) keeps both cases working; only
+          // the "OS displays nothing at all when the app is closed" gap is
+          // what's fixed here.
           await admin.messaging().send({
             token: row.token,
+            notification: { title: payload.title, body: payload.body },
             data: { title: payload.title, body: payload.body, deeplink: payload.deeplink },
             android: {
               priority: 'high',
