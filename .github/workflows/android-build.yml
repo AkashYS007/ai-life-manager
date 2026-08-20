@@ -52,6 +52,18 @@ jobs:
           pip install --quiet Pillow
           python3 scripts/apply_icons.py
 
+      # Native push notifications increment (2026-08-20) — wires the
+      # committed apps/mobile/google-services.json into the freshly
+      # scaffolded native project and makes sure the Google Services Gradle
+      # plugin is actually applied, same "re-apply on every fresh scaffold"
+      # reasoning as the icon step above. See that script's own comment for
+      # why google-services.json is safe to commit (it's client
+      # configuration, not a secret) and why the real Admin SDK credential
+      # never appears in this workflow at all — that one lives only in the
+      # backend's own Railway environment.
+      - name: Apply Firebase configuration
+        run: python3 scripts/apply_firebase_config.py
+
       # `webDir` in capacitor.config.ts points at `www/` even though this
       # app runs in remote-URL mode and never actually serves anything from
       # it — `cap sync` still expects the directory to exist before it will
