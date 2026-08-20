@@ -1796,6 +1796,35 @@ export const UNREGISTER_PUSH_SUBSCRIPTION = gql`
   }
 `;
 
+// Native app shell increment (2026-08-20) — see NativePushRegistration.tsx
+// for why this is a separate pair of mutations from
+// REGISTER_PUSH_SUBSCRIPTION/UNREGISTER_PUSH_SUBSCRIPTION above rather than
+// reusing them: a native FCM token has no p256dh/auth keys and isn't
+// identified by "endpoint."
+export const REGISTER_NATIVE_PUSH_TOKEN = gql`
+  mutation RegisterNativePushToken($input: RegisterNativePushTokenInput!) {
+    registerNativePushToken(input: $input) {
+      registered
+      errors {
+        code
+        message
+      }
+    }
+  }
+`;
+
+export const UNREGISTER_NATIVE_PUSH_TOKEN = gql`
+  mutation UnregisterNativePushToken($token: String!) {
+    unregisterNativePushToken(token: $token) {
+      unregistered
+      errors {
+        code
+        message
+      }
+    }
+  }
+`;
+
 // On-demand diagnostic increment (2026-08-19) — see push.resolver.ts's own
 // comment on sendTestNotification for why this bypasses the normal
 // reminder pipeline entirely (quiet hours, preferences, batching) and never
