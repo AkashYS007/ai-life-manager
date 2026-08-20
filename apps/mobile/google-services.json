@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "305142789324",
+    "project_id": "ai-life-manager-504020",
+    "storage_bucket": "ai-life-manager-504020.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:305142789324:android:b58eee4b7888a8dfafbe69",
+        "android_client_info": {
+          "package_name": "com.genzylife.ailifemanager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWYuUvP36RrdJPddS8hwRgym_cGCPYbuo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
