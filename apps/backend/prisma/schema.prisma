@@ -166,6 +166,7 @@ model User {
   subscription      Subscription?
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
+  nativePushTokens  NativePushToken[]
 
   @@map("users")
 }
@@ -908,4 +909,38 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// Native app shell increment (2026-08-20): a browser's PushSubscription
+// (endpoint + p256dh/auth keys, sent to a Web Push service) has no
+// equivalent inside the Capacitor Android WebView — Android's WebView
+// doesn't implement the Push API at all, which is exactly why the native
+// app's "Turn on browser notifications" button silently disappeared the
+// moment a real native app started loading this same web bundle (see
+// PushSubscribeButton's status==='unsupported' branch). A native app needs
+// real OS-level push instead: Firebase Cloud Messaging, registered via
+// `@capacitor/push-notifications`, identified by a device token rather than
+// an endpoint/keys pair. Deliberately a separate model rather than
+// shoehorning a nullable/optional shape onto PushSubscription — the two
+// have almost nothing in common (no p256dh/auth, a single opaque token
+// instead), and keeping them apart means NativePushService can stay fully
+// independent of WebPushService/VAPID, matching this codebase's existing
+// "one concern per service" shape (WebPushService/EmailService/SmsService).
+model NativePushToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The FCM registration token itself — opaque, rotates occasionally (the
+  // client re-registers on rotation, same as a browser's Push API can
+  // silently rotate a subscription's endpoint).
+  token     String   @unique
+  // Only ANDROID exists today (the one native platform actually shipped —
+  // see apps/mobile's README on iOS not being built yet), but this is a
+  // plain string rather than a hardcoded assumption so an eventual iOS/APNs
+  // token can reuse this exact table without a migration.
+  platform  String   @default("ANDROID")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("native_push_tokens")
 }
