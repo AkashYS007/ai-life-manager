@@ -64,6 +64,19 @@ jobs:
       - name: Apply Firebase configuration
         run: python3 scripts/apply_firebase_config.py
 
+      # WebView navigation bug fix (2026-08-20) — see
+      # scripts/apply_webview_navigation_fix.py's own comment for the full
+      # story: Capacitor's default WebViewClient was handing the entire app
+      # out to the system browser on almost every real launch, because it
+      # doesn't distinguish a real top-level navigation from an invisible
+      # background/iframe request (which Clerk, this app's auth provider,
+      # makes constantly during normal sign-in/session-sync activity). This
+      # overwrites the freshly-scaffolded MainActivity.java with a version
+      # that fixes that at the source, same "re-apply on every fresh
+      # scaffold" reasoning as the icon and Firebase steps above.
+      - name: Apply WebView navigation fix
+        run: python3 scripts/apply_webview_navigation_fix.py
+
       # `webDir` in capacitor.config.ts points at `www/` even though this
       # app runs in remote-URL mode and never actually serves anything from
       # it — `cap sync` still expects the directory to exist before it will
