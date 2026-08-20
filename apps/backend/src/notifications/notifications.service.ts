@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Notification } from './models/notification.model';
 import { UpdateNotificationPreferencesInput } from './dto/update-notification-preferences.input';
 import { WebPushService } from '../push/web-push.service';
+import { NativePushService } from '../push/native-push.service';
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 
@@ -42,17 +43,21 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly webPushService: WebPushService,
+    private readonly nativePushService: NativePushService,
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
   ) {}
 
   // Best-effort real delivery for one already-created/updated notification
-  // row — web push always attempted (WebPushService itself no-ops if
-  // unconfigured or the person has no registered subscription), email only
-  // when the person has actually opted in via emailNotificationsEnabled,
-  // and SMS (SMS delivery increment) only when smsNotificationsEnabled is on
-  // *and* a real phoneNumber is on file — the one existing preference field
-  // that toggled nothing at all until this increment finally gave it real
+  // row — web push and native push are both always attempted (each service
+  // no-ops on its own if unconfigured or the person has no registered
+  // subscription/token for that specific channel — a native-app user has no
+  // web subscription and vice versa, so both must be tried unconditionally
+  // rather than picking one), email only when the person has actually
+  // opted in via emailNotificationsEnabled, and SMS (SMS delivery
+  // increment) only when smsNotificationsEnabled is on *and* a real
+  // phoneNumber is on file — the one existing preference field that
+  // toggled nothing at all until this increment finally gave it real
   // behavior, same "opted in but nothing configured to send to yet" gap
   // emailNotificationsEnabled itself used to have before EmailService
   // existed. Wrapped so a delivery failure can never surface back to
@@ -62,7 +67,10 @@ export class NotificationsService {
   private async attemptDelivery(userId: string, notificationId: string, payload: StoredPayload): Promise<void> {
     try {
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
-      const deliveries: Promise<void>[] = [this.webPushService.sendToUser(userId, payload)];
+      const deliveries: Promise<void>[] = [
+        this.webPushService.sendToUser(userId, payload),
+        this.nativePushService.sendToUser(userId, payload),
+      ];
       if (user?.emailNotificationsEnabled && user.email) {
         deliveries.push(this.emailService.send({ to: user.email, subject: payload.title, body: payload.body }));
       }
