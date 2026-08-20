@@ -14,6 +14,7 @@ import {
 import { TimezoneSync } from './TimezoneSync';
 import { OnboardingGate } from './OnboardingGate';
 import { SyncManager } from './SyncManager';
+import { NativePushRegistration } from './NativePushRegistration';
 
 const isDevAuth = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev';
 
@@ -105,6 +106,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <TimezoneSync />
       <OnboardingGate />
       <SyncManager />
+      {/* Native app shell increment (2026-08-20): registers this device for
+          real OS-level push (FCM) when running inside the Capacitor app —
+          a true no-op on regular web, see the component's own comment. */}
+      <NativePushRegistration />
       {/* Accessibility (WCAG AA) pass: a keyboard user's very first Tab
           press on any page would otherwise land on whatever the first
           focusable element inside that page's own header happens to be

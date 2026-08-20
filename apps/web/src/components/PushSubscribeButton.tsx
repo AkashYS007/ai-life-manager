@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
+import { Capacitor } from '@capacitor/core';
 import {
   REGISTER_PUSH_SUBSCRIPTION,
   SEND_TEST_NOTIFICATION,
@@ -20,7 +21,7 @@ function urlBase64ToUint8Array(base64Url: string): Uint8Array {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
-type Status = 'unknown' | 'unsupported' | 'unconfigured' | 'off' | 'on' | 'denied';
+type Status = 'unknown' | 'unsupported' | 'native' | 'unconfigured' | 'off' | 'on' | 'denied';
 
 // Self-contained subscribe/unsubscribe control — deliberately not tied to
 // the pushNotificationsEnabled preference above it on this page, which only
@@ -41,6 +42,18 @@ export function PushSubscribeButton() {
     let cancelled = false;
 
     async function checkExisting() {
+      // Native app shell increment: inside the Capacitor app, browser push
+      // is genuinely unavailable (Android's WebView has no Push API at
+      // all — see NativePushRegistration.tsx's own comment), but that's not
+      // this device's fault or something a person here needs to "enable" —
+      // NativePushRegistration already handles it automatically, silently,
+      // via FCM. Checked first, before the generic unsupported branch
+      // below, so the native app gets its own accurate message instead of
+      // the browser-facing one.
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        if (!cancelled) setStatus('native');
+        return;
+      }
       if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
         if (!cancelled) setStatus('unsupported');
         return;
@@ -67,6 +80,14 @@ export function PushSubscribeButton() {
   const vapidPublicKey: string | null = vapidData?.vapidPublicKey ?? null;
 
   if (status === 'unknown') return null;
+
+  if (status === 'native') {
+    return (
+      <p className="mb-3 text-xs text-text-secondary dark:text-text-secondary-dark">
+        Notifications for this app are turned on automatically — no separate step needed here.
+      </p>
+    );
+  }
 
   if (status === 'unsupported') {
     return (
