@@ -77,6 +77,22 @@ jobs:
       - name: Apply WebView navigation fix
         run: python3 scripts/apply_webview_navigation_fix.py
 
+      # Voice + reliable-banner notifications increment (2026-08-20) — see
+      # scripts/apply_native_notifications.py's own comment for the full
+      # story: a data-only FCM message (see native-push.service.ts) never
+      # gets auto-displayed by the OS on its own, and the
+      # @capacitor/push-notifications plugin's own default
+      # FirebaseMessagingService only ever forwards it to this app's JS —
+      # which never runs when the app is backgrounded or killed, so nothing
+      # showed and nothing spoke in exactly the case this feature exists
+      # for. Same "re-apply on every fresh scaffold" reasoning as every
+      # other apply_*.py step above: this writes a real native class
+      # (AiLifeManagerMessagingService) that shows the banner and speaks
+      # the reminder out loud itself, and patches AndroidManifest.xml to
+      # route FCM messages to it instead of Capacitor's own default.
+      - name: Apply native notifications (voice + banner)
+        run: python3 scripts/apply_native_notifications.py
+
       # `webDir` in capacitor.config.ts points at `www/` even though this
       # app runs in remote-URL mode and never actually serves anything from
       # it — `cap sync` still expects the directory to exist before it will
