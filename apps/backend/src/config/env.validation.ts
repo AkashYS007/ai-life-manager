@@ -72,7 +72,20 @@ export const envSchema = z.object({
   // demo link can't land anyone on a real payment page or a fake "upgrade"
   // before the app is ready to sell anything. Flip back to "true" (or
   // unset it) to re-enable; no code change needed either direction.
-  PAID_TIERS_ENABLED: z.coerce.boolean().default(true),
+  // Fixed 2026-08-24 (backend audit Update 49 finding #1): this was
+  // `z.coerce.boolean().default(true)`, which coerces via plain
+  // `Boolean(value)` — and `Boolean("false")` is `true` in JavaScript, so
+  // setting this to the string "false" (the only realistic way to set an
+  // env var) silently did nothing; the demo-safety switch this exists for
+  // had no effect via any value anyone would actually use. This version
+  // reads the raw string and only treats the literal (case/whitespace
+  // insensitive) word "false" as disabling paid tiers — everything else,
+  // including unset, matches the original "on by default" behavior.
+  PAID_TIERS_ENABLED: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((v) => v.trim().toLowerCase() !== 'false'),
   // Real notification delivery — Web Push (VAPID), email (Resend), and SMS
   // (Twilio). Declared here even though WebPushService/EmailService/
   // SmsService each still read `process.env` directly rather than through
