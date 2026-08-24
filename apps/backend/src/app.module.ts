@@ -2,8 +2,9 @@ import { Module } from '@nestjs/common';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
 import { resolveAuthContext } from './auth/resolve-auth-context';
@@ -33,6 +34,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { BillingModule } from './billing/billing.module';
 import { HealthController } from './health/health.controller';
 import { GraphqlExceptionFilter } from './common/filters/graphql-exception.filter';
+import { AuthGuard } from './auth/auth.guard';
 
 @Module({
   imports: [
@@ -52,6 +54,22 @@ import { GraphqlExceptionFilter } from './common/filters/graphql-exception.filte
     // PlannerModule directly, which would be circular (PlannerModule
     // already imports both — see planner.module.ts).
     EventEmitterModule.forRoot(),
+    // Rate limiting increment (backend review follow-up, 2026-08-24): a
+    // single named 'default' throttler, applied *only* where explicitly
+    // decorated with `@Throttle()` + `@UseGuards(GqlThrottlerGuard)` — the
+    // handful of AI-calling mutations/queries the audit flagged as real,
+    // billed, currently-unbounded external API calls (PlannerResolver's
+    // requestReplan/estimateTaskDuration, ChatResolver's
+    // sendChatMessage/sendChatMessageStreaming,
+    // RecommendationsResolver's generateRecommendations). Deliberately not
+    // registered as a global APP_GUARD: this app's ordinary read queries
+    // and cheap writes were never the cost/abuse risk the audit raised,
+    // and blanket-throttling everything (including the graphql-ws
+    // subscription transport, which has no per-request req/res cycle to
+    // throttle the same way) is a much larger, riskier surface to get
+    // right than gating the small number of endpoints that actually call
+    // out to Anthropic.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 20 }]),
     // forRootAsync (not the plain forRoot every other increment's own
     // comments here used to describe) specifically so `onConnect` below can
     // inject the real ConfigService — needed to resolve AUTH_MODE/
@@ -146,6 +164,19 @@ import { GraphqlExceptionFilter } from './common/filters/graphql-exception.filte
     {
       provide: APP_FILTER,
       useClass: GraphqlExceptionFilter,
+    },
+    // Global-auth-by-default hardening (backend review follow-up,
+    // 2026-08-24): previously AuthGuard was opt-in, applied per-resolver
+    // via `@UseGuards(AuthGuard)` (21/22 resolvers already had it — the
+    // sole exception, SubscriptionResolver, is a safe `@ResolveField` that
+    // only ever runs against an already-authorized parent object, per the
+    // architecture audit). Registering it here too means a *new* resolver
+    // is Clerk-gated automatically even if that decorator is forgotten —
+    // see AuthGuard's own comment for why this is still safe for the
+    // app's REST webhook/OAuth-callback surface.
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
     },
   ],
 })
