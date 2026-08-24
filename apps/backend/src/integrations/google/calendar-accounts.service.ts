@@ -77,7 +77,28 @@ export class CalendarAccountsService {
       },
     });
 
-    await this.sync(account.id);
+    // Phantom-connected-account fix (2026-08-24, backend audit Update 49
+    // finding #8, medium severity): the row above is upserted as ACTIVE
+    // with valid tokens *before* this first sync ever runs. If Google
+    // returns a transient error (a 5xx, a timeout) on this very first API
+    // call, the exception used to propagate straight out of connect() —
+    // the OAuth callback controller catches it and redirects the user to
+    // an error page, but this row was already committed and left sitting
+    // there as ACTIVE, so the account silently shows up as "connected"
+    // server-side even though the person was told it failed. The tokens
+    // themselves are still good here (the failure is in fetching *events*,
+    // not in the OAuth exchange) — deleting the row would force a full
+    // re-consent for no reason — so this marks it ERROR instead, an
+    // accurate reflection of "connected, but the initial sync hasn't
+    // actually succeeded yet," then re-throws so the existing
+    // caller-facing error handling (the OAuth controller's redirect) is
+    // completely unchanged.
+    try {
+      await this.sync(account.id);
+    } catch (error) {
+      await this.prisma.calendarAccount.update({ where: { id: account.id }, data: { status: 'ERROR' } });
+      throw error;
+    }
     // Best-effort, same "an enhancement must never block the core action"
     // principle as every other automatic-write-after-a-real-action in this
     // app (see e.g. MemoryService.refreshChronotypePattern's own callers) —
