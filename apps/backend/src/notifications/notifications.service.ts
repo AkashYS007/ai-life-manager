@@ -40,6 +40,34 @@ function toGraphNotification(record: any): Notification {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
+  // Overlap/race fixes (2026-08-24, backend audit Update 49 finding #7,
+  // medium severity). Two related but distinct problems, two distinct
+  // guards:
+  //
+  // 1. `deliverDueRunning` — @nestjs/schedule's plain @Cron has no
+  //    built-in protection against a new tick starting while the previous
+  //    invocation of the *same* cron method is still running. Cheap,
+  //    in-process, single-instance-only (fine here — this app runs as one
+  //    Railway service, confirmed during the Update 48 deploy work; a
+  //    multi-instance deployment would need a real distributed lock
+  //    instead).
+  //
+  // 2. `createLocks` — the deeper fix, and the one that actually closes
+  //    the race regardless of *what* triggers it. `create()`'s own
+  //    find-then-branch (below) is a classic check-then-act: two calls for
+  //    the same (userId, type) — from an overlapping cron tick, or from
+  //    two entirely unrelated callers (e.g. SchedulerService and
+  //    RecommendationsService both reacting to the same moment) — can both
+  //    see "no recent unread row" and both `create()`, each independently
+  //    triggering a real push/email/SMS for what should be one deduped
+  //    notification. A per-(userId, type) in-process queue serializes just
+  //    that decision+write, so the second caller always sees the first
+  //    one's already-created row before deciding what to do — a would-be
+  //    duplicate becomes a batched update instead, this file's own
+  //    documented intent.
+  private deliverDueRunning = false;
+  private readonly createLocks = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly webPushService: WebPushService,
@@ -47,6 +75,24 @@ export class NotificationsService {
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
   ) {}
+
+  // Runs `fn` after every prior call queued under the same `key` has
+  // settled, regardless of whether that prior call succeeded or threw —
+  // otherwise one failed `create()` for a given (userId, type) would wedge
+  // every future call for that same key behind a permanently-rejected
+  // promise.
+  private withCreateLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prior = this.createLocks.get(key) ?? Promise.resolve();
+    const run = prior.then(fn, fn);
+    this.createLocks.set(
+      key,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
 
   // Best-effort real delivery for one already-created/updated notification
   // row — web push and native push are both always attempted (each service
@@ -102,19 +148,29 @@ export class NotificationsService {
   // the Architecture Document's Temporal-based design).
   @Cron('*/15 * * * *')
   async deliverDueNotifications(): Promise<void> {
-    const due = await this.prisma.notification.findMany({
-      where: { scheduledFor: { lte: new Date() }, deliveredAt: null },
-      take: 200,
-    });
+    // Overlap guard — see this class's own comment on `deliverDueRunning`.
+    if (this.deliverDueRunning) {
+      this.logger.warn('deliverDueNotifications sweep skipped — the previous invocation is still running.');
+      return;
+    }
+    this.deliverDueRunning = true;
+    try {
+      const due = await this.prisma.notification.findMany({
+        where: { scheduledFor: { lte: new Date() }, deliveredAt: null },
+        take: 200,
+      });
 
-    for (const notification of due) {
-      try {
-        await this.attemptDelivery(notification.userId, notification.id, notification.payload as unknown as StoredPayload);
-      } catch (error) {
-        // Isolate one bad row from the rest of the sweep — same "keep going"
-        // discipline as SchedulerService.checkReminders' per-user try/catch.
-        this.logger.warn(`Sweep delivery failed for notification ${notification.id}: ${(error as Error).message}`);
+      for (const notification of due) {
+        try {
+          await this.attemptDelivery(notification.userId, notification.id, notification.payload as unknown as StoredPayload);
+        } catch (error) {
+          // Isolate one bad row from the rest of the sweep — same "keep going"
+          // discipline as SchedulerService.checkReminders' per-user try/catch.
+          this.logger.warn(`Sweep delivery failed for notification ${notification.id}: ${(error as Error).message}`);
+        }
       }
+    } finally {
+      this.deliverDueRunning = false;
     }
   }
 
@@ -160,60 +216,69 @@ export class NotificationsService {
     const now = DateTime.fromJSDate(new Date(), { zone: timezone });
     const scheduledFor = this.resolveScheduledFor(now, user.quietHoursStart, user.quietHoursEnd);
 
-    const recentSameType = await this.prisma.notification.findFirst({
-      where: {
-        userId,
-        type,
-        readAt: null,
-        createdAt: { gte: now.minus({ hours: BATCH_WINDOW_HOURS }).toJSDate() },
-      },
-      orderBy: { createdAt: 'desc' },
+    // Race-condition fix (2026-08-24, backend audit Update 49 finding #7,
+    // medium severity) — see this class's own comment on `createLocks` for
+    // the full reasoning. Serializing on `${userId}:${type}` means a second
+    // concurrent call for the exact same person+type always waits for the
+    // first to finish deciding create-vs-update before making its own
+    // decision, so the two can never both see "no recent row" and both
+    // create one.
+    await this.withCreateLock(`${userId}:${type}`, async () => {
+      const recentSameType = await this.prisma.notification.findFirst({
+        where: {
+          userId,
+          type,
+          readAt: null,
+          createdAt: { gte: now.minus({ hours: BATCH_WINDOW_HOURS }).toJSDate() },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Repeat-delivery fix: batching a same-type row (below) must refresh
+      // what's *shown* — payload, scheduledFor, status — without re-sending a
+      // real push every time it's refreshed. Before this fix, an update also
+      // reset `deliveredAt: null`, and the immediate-delivery call further
+      // down fired unconditionally whenever `scheduledFor <= now` — true on
+      // essentially every re-check of an already-overdue reminder (e.g.
+      // SchedulerService.checkRemindersForUser re-calling create() for the
+      // same still-overdue habit on every 15-minute tick). The result: one
+      // real web push per tick for as long as the habit stayed in its overdue
+      // window (up to 8 in a row), which is exactly the "batched, not spammy"
+      // guarantee this file's own BATCH_WINDOW_HOURS comment promises but
+      // didn't actually deliver on. Now: `deliveredAt` is left untouched on
+      // an update (so an already-delivered row can't be picked up again by
+      // this method or by deliverDueNotifications' sweep), and the immediate
+      // delivery attempt only ever runs for a genuinely new row — a batched
+      // update to an existing unread notification never re-triggers real
+      // delivery, no matter how many times create() is called for it before
+      // it's read or the batch window closes.
+      let notificationId: string;
+      let isNewNotification: boolean;
+      if (recentSameType) {
+        const updated = await this.prisma.notification.update({
+          where: { id: recentSameType.id },
+          data: { payload: payload as any, scheduledFor, status: 'PENDING' },
+        });
+        notificationId = updated.id;
+        isNewNotification = false;
+      } else {
+        const created = await this.prisma.notification.create({
+          data: { userId, type, channel: 'PUSH', payload: payload as any, scheduledFor, status: 'PENDING' },
+        });
+        notificationId = created.id;
+        isNewNotification = true;
+      }
+
+      // Not deferred by quiet hours (scheduledFor is now, not later): attempt
+      // real delivery immediately rather than waiting up to 15 minutes for the
+      // next sweep. A quiet-hours-deferred row is deliberately left
+      // undelivered here — deliverDueNotifications() picks it up the moment
+      // its scheduledFor actually arrives. Gated to new rows only — see the
+      // comment above.
+      if (isNewNotification && scheduledFor.getTime() <= Date.now()) {
+        await this.attemptDelivery(userId, notificationId, payload);
+      }
     });
-
-    // Repeat-delivery fix: batching a same-type row (below) must refresh
-    // what's *shown* — payload, scheduledFor, status — without re-sending a
-    // real push every time it's refreshed. Before this fix, an update also
-    // reset `deliveredAt: null`, and the immediate-delivery call further
-    // down fired unconditionally whenever `scheduledFor <= now` — true on
-    // essentially every re-check of an already-overdue reminder (e.g.
-    // SchedulerService.checkRemindersForUser re-calling create() for the
-    // same still-overdue habit on every 15-minute tick). The result: one
-    // real web push per tick for as long as the habit stayed in its overdue
-    // window (up to 8 in a row), which is exactly the "batched, not spammy"
-    // guarantee this file's own BATCH_WINDOW_HOURS comment promises but
-    // didn't actually deliver on. Now: `deliveredAt` is left untouched on
-    // an update (so an already-delivered row can't be picked up again by
-    // this method or by deliverDueNotifications' sweep), and the immediate
-    // delivery attempt only ever runs for a genuinely new row — a batched
-    // update to an existing unread notification never re-triggers real
-    // delivery, no matter how many times create() is called for it before
-    // it's read or the batch window closes.
-    let notificationId: string;
-    let isNewNotification: boolean;
-    if (recentSameType) {
-      const updated = await this.prisma.notification.update({
-        where: { id: recentSameType.id },
-        data: { payload: payload as any, scheduledFor, status: 'PENDING' },
-      });
-      notificationId = updated.id;
-      isNewNotification = false;
-    } else {
-      const created = await this.prisma.notification.create({
-        data: { userId, type, channel: 'PUSH', payload: payload as any, scheduledFor, status: 'PENDING' },
-      });
-      notificationId = created.id;
-      isNewNotification = true;
-    }
-
-    // Not deferred by quiet hours (scheduledFor is now, not later): attempt
-    // real delivery immediately rather than waiting up to 15 minutes for the
-    // next sweep. A quiet-hours-deferred row is deliberately left
-    // undelivered here — deliverDueNotifications() picks it up the moment
-    // its scheduledFor actually arrives. Gated to new rows only — see the
-    // comment above.
-    if (isNewNotification && scheduledFor.getTime() <= Date.now()) {
-      await this.attemptDelivery(userId, notificationId, payload);
-    }
   }
 
   // The only read path — and, per the schema comment, the closest thing
