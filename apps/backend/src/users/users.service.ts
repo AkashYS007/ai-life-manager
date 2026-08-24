@@ -3,6 +3,23 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthContext } from '../auth/auth-context';
 
+// Duck-typed unique-constraint check, not `error instanceof
+// Prisma.PrismaClientKnownRequestError` — caught live by actually running
+// this file's own test suite (2026-08-24): this repo's generated
+// `@prisma/client` doesn't re-export `PrismaClientKnownRequestError` off
+// the `Prisma` namespace object at all (confirmed directly: `Object.keys(
+// require('@prisma/client').Prisma)` has no Error-suffixed entries in this
+// install), so `Prisma.PrismaClientKnownRequestError` is `undefined` and
+// the `instanceof` check would silently always be `false` — the exact
+// "never actually verified, would have shipped broken" mistake this
+// backend audit round is specifically trying to avoid. Every Prisma known
+// request error carries a real `.code` string regardless of which class it
+// is or how it's exported, so checking that directly needs no import at
+// all and can't be broken by a client-generation quirk like this one.
+function isPrismaUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
+  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002';
+}
+
 // This is the JIT-provisioning use case named in the Architecture Document's
 // identity flow: the first time a verified identity (Clerk or dev-auth) is
 // seen, we create the local `users` row (and a default Free subscription,
@@ -51,20 +68,47 @@ export class UsersService {
       return existing;
     }
 
-    return this.prisma.user.create({
-      data: {
-        email: auth.email,
-        authProviderId: auth.authProviderId,
-        timezone: 'UTC',
-        subscription: {
-          create: {
-            tier: 'FREE',
-            status: 'ACTIVE',
+    // Race-condition fix (2026-08-24, backend audit Update 49 finding #3,
+    // high severity): this used to be a bare `create()` with no error
+    // handling — this method is called (via getOrCreateFromAuth) from 90+
+    // places across nearly every resolver in the app, and a brand-new
+    // user's very first authenticated page load routinely fires several
+    // GraphQL operations in parallel (`me` + `today` + `tasks` +
+    // `notifications`, etc.). Each one independently sees `existing ===
+    // null` and races to create the same row; the first `create()` wins,
+    // every other one used to throw an unhandled Prisma P2002
+    // unique-constraint error (on the `authProviderId` unique index)
+    // straight out to the caller instead of falling back to the row that
+    // just landed. Now: a P2002 here is treated the same way a genuine
+    // race should be treated — someone else already finished the very
+    // thing this call was trying to do — so it re-fetches and returns that
+    // row instead of failing the request. Any other error still propagates
+    // unchanged.
+    try {
+      return await this.prisma.user.create({
+        data: {
+          email: auth.email,
+          authProviderId: auth.authProviderId,
+          timezone: 'UTC',
+          subscription: {
+            create: {
+              tier: 'FREE',
+              status: 'ACTIVE',
+            },
           },
         },
-      },
-      include: { subscription: true },
-    });
+        include: { subscription: true },
+      });
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        const winner = await this.prisma.user.findUnique({
+          where: { authProviderId: auth.authProviderId },
+          include: { subscription: true },
+        });
+        if (winner) return winner;
+      }
+      throw error;
+    }
   }
 
   // Real billing/subscription management increment. Honest about what this
@@ -188,30 +232,32 @@ export class UsersService {
     });
   }
 
-  // Account deletion increment. A real gap surfaced while surveying for
-  // this: `User` only ever declared a Prisma relation (a real foreign key,
-  // with `onDelete: Cascade`) to three tables — Subscription, Notification,
-  // PushSubscription. Every other user-owned table (tasks, goals, habits,
-  // calendar events/accounts, mood/energy/sleep entries, AI plan runs, AI
-  // recommendation runs, AI conversations, AI memory facts, journal
-  // entries, daily reflections, routines, focus sessions, tags) only ever
-  // has a plain `userId` column with no declared relation at all — so
-  // deleting the `users` row itself would silently leave every one of
-  // those rows behind as orphaned data, not fail and not clean up.
-  // `User.deletedAt` already exists and is already respected by
-  // SchedulerService's own user-selection query, which made a soft delete
-  // tempting — rejected on purpose: soft-deleting only the `users` row
-  // while leaving all of the above fully intact would be a worse half
-  // measure than either a real hard delete or a real soft-delete-
-  // everywhere design, and nothing else in this codebase needs the softer
-  // behavior yet. So: a real hard delete, one explicit `deleteMany({
-  // where: { userId } })` per table with no declared relation (in one
-  // transaction, so a mid-way failure leaves nothing partially deleted),
-  // then the `users` row itself — whose own real Cascade relations clean up
-  // Subscription/Notification/PushSubscription for free. Child rows one
-  // level down (HabitLog, RoutineLog, AiChatMessage, TaskTag) aren't listed
-  // explicitly — they cascade automatically once their real parent (Habit/
-  // Routine/AiConversation/Task) is deleted here.
+  // Account deletion increment. Originally written when `User` only
+  // declared a real Prisma relation (a real foreign key, with
+  // `onDelete: Cascade`) to three tables — Subscription, Notification,
+  // PushSubscription — leaving every other user-owned table with a plain
+  // `userId` column and no declared relation, which is why the explicit
+  // per-table `deleteMany` calls below exist at all.
+  //
+  // Corrected 2026-08-24 (backend audit Update 49 finding #11, low
+  // severity — a doc/reality mismatch, not a behavior bug): the Update 48
+  // FK migration added a real `onDelete: Cascade` relation for all 21
+  // user-owned tables, so every `deleteMany` call below is now redundant
+  // with what a plain `user.delete()` would already cascade on its own —
+  // harmless to keep (defense-in-depth, and this method predates that
+  // migration), but the *reason* originally written here ("these tables
+  // have no FK, so a hard delete would orphan them") is no longer true and
+  // was actively misleading about what happens if a future edit ever
+  // removed one of these lines. `User.deletedAt` already exists and is
+  // already respected by SchedulerService's own user-selection query,
+  // which made a soft delete tempting — rejected on purpose: soft-deleting
+  // only the `users` row while leaving all of the above fully intact would
+  // be a worse half measure than either a real hard delete or a real
+  // soft-delete-everywhere design, and nothing else in this codebase needs
+  // the softer behavior yet. Child rows one level down (HabitLog,
+  // RoutineLog, AiChatMessage, TaskTag) aren't listed explicitly — they
+  // cascade automatically once their real parent (Habit/Routine/
+  // AiConversation/Task) is deleted here, same as before.
   //
   // Never actually run against a live database in this sandbox (no
   // Postgres available) — verified by reading the schema relation-by-
