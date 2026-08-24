@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterPushSubscriptionInput } from './dto/register-push-subscription.input';
+import { withRetry } from '../common/retry';
 
 interface PushPayload {
   title: string;
@@ -89,9 +90,29 @@ export class WebPushService {
     await Promise.all(
       subscriptions.map(async (sub) => {
         try {
-          await webpush.sendNotification(
-            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-            JSON.stringify(payload),
+          // Delivery retry increment (backend review follow-up,
+          // 2026-08-24 — see common/retry.ts's own comment for the full
+          // reasoning). 3 attempts total, ~500ms/~1000ms backoff — a
+          // transient failure from the push service now gets two real
+          // extra tries within this same call before falling through to
+          // the same log-and-move-on behavior this catch always had.
+          // `shouldRetry` fails fast on 404/410 (the push service saying
+          // this subscription is gone for good) so the prune branch below
+          // still runs on the very first such response, exactly as before.
+          await withRetry(
+            () =>
+              webpush.sendNotification(
+                { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+                JSON.stringify(payload),
+              ),
+            {
+              attempts: 3,
+              baseDelayMs: 500,
+              shouldRetry: (error) => {
+                const statusCode = (error as { statusCode?: number }).statusCode;
+                return statusCode !== 404 && statusCode !== 410;
+              },
+            },
           );
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;
