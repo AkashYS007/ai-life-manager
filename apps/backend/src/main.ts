@@ -16,7 +16,34 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
-  app.enableCors({ origin: true, credentials: true });
+  // CORS fix (2026-08-24, backend audit Update 49 finding #2): this used to
+  // be `{ origin: true, credentials: true }`, which reflects *any* request's
+  // Origin header back as the allowed origin — combined with
+  // `credentials: true`, that let literally any website make an
+  // authenticated cross-origin request against this API and have the
+  // browser honor it. FRONTEND_URL already existed in config (used
+  // correctly elsewhere for OAuth redirects) but was never wired into CORS
+  // at all. Comma-separated so both the apex and `www` domains (or a
+  // staging + prod pair) can be allowed at once without a code change —
+  // matches the "update FRONTEND_URL to the new domains" item already
+  // queued in the roadmap. Requests with no Origin header (server-to-server
+  // calls, curl, most non-browser HTTP clients) have nothing to check
+  // against an allowlist and are let through unchanged from before this fix.
+  const allowedOrigins = (config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      }
+    },
+    credentials: true,
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const port = config.get<number>('PORT') ?? 4000;
