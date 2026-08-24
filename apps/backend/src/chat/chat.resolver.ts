@@ -1,7 +1,9 @@
 import { Inject, UseGuards } from '@nestjs/common';
 import { Args, ID, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
+import { Throttle } from '@nestjs/throttler';
 import { PubSub } from 'graphql-subscriptions';
 import { AuthGuard } from '../auth/auth.guard';
+import { GqlThrottlerGuard } from '../common/guards/gql-throttler.guard';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthContext } from '../auth/auth-context';
 import { UsersService } from '../users/users.service';
@@ -41,6 +43,14 @@ export class ChatResolver {
     }
   }
 
+  // Rate limiting increment (backend review follow-up, 2026-08-24 — AI/
+  // planner audit finding: no cost controls on any AI-calling endpoint).
+  // Each call is a real, billed Anthropic request (up to MAX_TOOL_ROUNDS of
+  // them, per chat.service.ts) with no other cap in the stack — 20/min per
+  // client is generous for genuine back-and-forth conversation while still
+  // bounding an unthrottled loop's worst case.
+  @UseGuards(GqlThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Mutation(() => SendChatMessagePayload)
   async sendChatMessage(
     @CurrentAuth() auth: AuthContext,
@@ -76,6 +86,20 @@ export class ChatResolver {
   // Same errors, same final return shape as sendChatMessage above — the
   // plain sendChatMessage mutation is still untouched and fully functional
   // on its own, this is a genuinely additive second path.
+  // Same rate limit and reasoning as sendChatMessage above. Throttler
+  // tracks each decorated handler independently (keyed by class+method
+  // name), so this is its own 20/min bucket, not shared with
+  // sendChatMessage's — a client alternating between both mutations isn't
+  // bounded to a combined 20/min, only to 20/min on each individually. That
+  // residual gap is deliberately left open rather than papered over with a
+  // shared custom key: the two mutations are genuinely different code
+  // paths (streaming vs. not) that a real client picks between, not two
+  // ways to double a single action, and closing it would need a shared
+  // `generateKey` keyed by user id instead of by handler — worth doing if
+  // this ever needs tightening further, not required to close the actual
+  // unbounded-cost risk the audit flagged.
+  @UseGuards(GqlThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Mutation(() => SendChatMessagePayload)
   async sendChatMessageStreaming(
     @CurrentAuth() auth: AuthContext,
