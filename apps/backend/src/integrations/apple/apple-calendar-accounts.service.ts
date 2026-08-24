@@ -93,7 +93,23 @@ export class AppleCalendarAccountsService {
       },
     });
 
-    await this.sync(account.id);
+    // Phantom-connected-account fix (2026-08-24, backend audit Update 49
+    // finding #8, medium severity) — same fix, same reasoning, as
+    // CalendarAccountsService's own connect() on the Google side: the row
+    // above is upserted ACTIVE with valid tokens before this first sync
+    // ever runs. Unlike Google/Microsoft this mutation has no redirect —
+    // the resolver just surfaces `CONNECT_FAILED` straight to the caller —
+    // but the same gap applies: the ACTIVE row was already committed, so
+    // it read as connected server-side even while the person was told it
+    // failed. Marks ERROR (not a delete — the app-specific password is
+    // still good, only the sync failed) and re-throws so the resolver's
+    // existing `CONNECT_FAILED` handling is unchanged.
+    try {
+      await this.sync(account.id);
+    } catch (error) {
+      await this.prisma.calendarAccount.update({ where: { id: account.id }, data: { status: 'ERROR' } });
+      throw error;
+    }
     return account;
   }
 
