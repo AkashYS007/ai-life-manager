@@ -134,6 +134,23 @@ export class HabitsService {
     return habit;
   }
 
+  // Ownership check on the client-supplied goalId (backend audit Update 49
+  // finding #4, high severity): create()/update() used to write
+  // `input.goalId` straight onto the habit with no check at all — unlike
+  // every id this class actually resolves elsewhere (`requireOwnedHabit`),
+  // a caller could point a habit at *any* goal id, including one owned by
+  // a different user, and it would come back embedded (`goal: true` is
+  // always included) on every future read of that habit. Only called when
+  // a non-null goalId is actually being set — `undefined` (leave alone) and
+  // `null` (clear the link) never reach here, matching the existing
+  // "undefined leaves it, null clears it" convention on this field.
+  private async requireOwnedGoal(userId: string, id: string): Promise<void> {
+    const goal = await this.prisma.goal.findFirst({ where: { id, userId } });
+    if (!goal) {
+      throw new NotFoundException('Goal not found');
+    }
+  }
+
   // Shapes a raw Habit row (plus whether *today's* log is completed) into
   // the GraphQL model — the same "service layer flattens storage details"
   // split as tasks.service.ts's toGraphTask.
@@ -219,6 +236,9 @@ export class HabitsService {
   }
 
   async create(userId: string, timezone: string, input: CreateHabitInput): Promise<Habit> {
+    if (input.goalId) {
+      await this.requireOwnedGoal(userId, input.goalId);
+    }
     const rrule = buildRruleOrThrow({
       frequency: input.frequency,
       daysOfWeek: input.daysOfWeek,
@@ -250,6 +270,9 @@ export class HabitsService {
 
   async update(userId: string, timezone: string, id: string, input: UpdateHabitInput): Promise<Habit> {
     const existing = await this.requireOwnedHabit(userId, id);
+    if (input.goalId) {
+      await this.requireOwnedGoal(userId, input.goalId);
+    }
 
     const existingRecurrence = parseRrule(existing.rrule);
     const currentFrequency =
