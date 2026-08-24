@@ -83,37 +83,33 @@ export class NativePushService {
     await Promise.all(
       tokens.map(async (row) => {
         try {
-          // Bug fix (2026-08-20, confirmed via a live manual FCM send from
-          // the Railway console): this used to omit the top-level
-          // `notification` key on the theory that the native Capacitor Push
-          // Notifications plugin's own local-notification fallback would
-          // still surface a system notification for a data-only message
-          // (see git history for the original comment's full reasoning).
-          // That fallback only runs inside the app's own JS — which never
-          // gets a chance to execute once Android has actually killed the
-          // WebView process (confirmed happens well within a 5-minute
-          // locked-screen test), so on a real phone, in the real "reminder
-          // fires while the app isn't open" case this feature exists for,
-          // nothing ever displayed. A manual admin.messaging().send() with
-          // a real top-level `notification` block, sent to this exact same
-          // registered token, displayed correctly with sound — same
-          // WhatsApp/Instagram-style behavior the person asked to match —
-          // proving that's what was missing. Setting both `notification`
-          // (so the OS auto-displays it, with sound/vibration/banner, the
-          // moment the app is backgrounded or fully killed — no app JS
-          // required to run at all) and `data` (still delivered alongside
-          // it to any listener that IS running, e.g. a foregrounded app,
-          // for deeplink navigation on tap) keeps both cases working; only
-          // the "OS displays nothing at all when the app is closed" gap is
-          // what's fixed here.
+          // Voice + reliable-banner notifications increment (2026-08-20,
+          // second revision — see git history for the two earlier shapes
+          // tried here and why each one was replaced). This is back to a
+          // pure data-only message (no top-level `notification`, no
+          // `android.notification` override) — but for a different, more
+          // deliberate reason than the original implementation had: any
+          // message that includes a `notification` payload gets
+          // auto-displayed by the OS *instead of* calling this app's
+          // FirebaseMessagingService.onMessageReceived() whenever the app
+          // isn't in the foreground — confirmed via a live manual FCM send
+          // from the Railway console that a `notification` payload does
+          // reliably show a banner, but that finding cuts the other way
+          // once voice read-out entered scope: it also means real native
+          // code (AiLifeManagerMessagingService, see
+          // scripts/apply_native_notifications.py) never gets a chance to
+          // run when the app is backgrounded or killed, which is exactly
+          // when a voice reminder is most needed. A pure data-only message
+          // is the one shape where onMessageReceived() is *always* called,
+          // in every app state — that native class is what now owns
+          // showing the banner (so the "OS displays nothing when the app is
+          // closed" gap this whole increment started from stays fixed) and
+          // speaking the reminder out loud, both together, from one place
+          // that's guaranteed to actually run.
           await admin.messaging().send({
             token: row.token,
-            notification: { title: payload.title, body: payload.body },
             data: { title: payload.title, body: payload.body, deeplink: payload.deeplink },
-            android: {
-              priority: 'high',
-              notification: { title: payload.title, body: payload.body, channelId: 'reminders' },
-            },
+            android: { priority: 'high' },
           });
         } catch (error) {
           const code = (error as { code?: string }).code;
