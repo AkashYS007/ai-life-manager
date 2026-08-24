@@ -1,6 +1,8 @@
 import { UseGuards } from '@nestjs/common';
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '../auth/auth.guard';
+import { GqlThrottlerGuard } from '../common/guards/gql-throttler.guard';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthContext } from '../auth/auth-context';
 import { UsersService } from '../users/users.service';
@@ -28,6 +30,13 @@ export class RecommendationsResolver {
     return this.recommendationsService.getToday(user.id, user.timezone);
   }
 
+  // Rate limiting increment (backend review follow-up, 2026-08-24 — AI/
+  // planner audit finding: no cost controls on any AI-calling endpoint).
+  // Same reasoning as PlannerResolver.requestReplan — a real, billed
+  // Anthropic call with no other cap in the stack; 10/min is far above any
+  // real "refresh my recommendations" usage pattern.
+  @UseGuards(GqlThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Mutation(() => RecommendationRunPayload)
   async generateRecommendations(@CurrentAuth() auth: AuthContext): Promise<RecommendationRunPayload> {
     const user = await this.usersService.getOrCreateFromAuth(auth);
