@@ -167,7 +167,7 @@ public class AiLifeManagerMessagingService extends MessagingService {
 
     // Voice notifications increment: speaks the reminder out loud using
     // Android's on-device text-to-speech engine -- skipped entirely if the
-    // phone is silenced or on vibrate (AudioManager's rin�er mode is the
+    // phone is silenced or on vibrate (AudioManager's ringer mode is the
     // same signal a normal notification sound would already respect), per
     // the person's own explicit choice not to have this override silent
     // mode the way an alarm would.
@@ -209,14 +209,14 @@ public class AiLifeManagerMessagingService extends MessagingService {
 """
 
 MANIFEST_SERVICE_BLOCK = """
-        <!-- Voice + reliable-banner notifications increment (2026-08-20) --
+        <!-- Voice + reliable-banner notifications increment (2026-08-20):
              see AiLifeManagerMessagingService's own comment for the full
              story. Removes the @capacitor/push-notifications plugin's own
              default FirebaseMessagingService (contributed by its AAR's own
              manifest at build time, so it can't just be deleted at the
              source) and replaces it with a subclass that does everything
              the original did, plus shows a real notification banner and
-             speaks the reminder out loud -- every FCM message this app
+             speaks the reminder out loud, every FCM message this app
              sends still needs exactly one component actually receiving it,
              so this is a replace, not an addition. -->
         <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />
