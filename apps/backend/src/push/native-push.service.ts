@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { PrismaService } from '../prisma/prisma.service';
+import { withRetry } from '../common/retry';
 
 interface PushPayload {
   title: string;
@@ -106,11 +107,28 @@ export class NativePushService {
           // closed" gap this whole increment started from stays fixed) and
           // speaking the reminder out loud, both together, from one place
           // that's guaranteed to actually run.
-          await admin.messaging().send({
-            token: row.token,
-            data: { title: payload.title, body: payload.body, deeplink: payload.deeplink },
-            android: { priority: 'high' },
-          });
+          // Delivery retry increment (backend review follow-up,
+          // 2026-08-24 — see common/retry.ts and WebPushService.sendToUser's
+          // matching comment). Same 3-attempts/~500ms-backoff shape;
+          // `shouldRetry` fails fast on FCM's two "this token is gone for
+          // good" codes so the prune branch below still runs immediately
+          // on those, same as before.
+          await withRetry(
+            () =>
+              admin.messaging().send({
+                token: row.token,
+                data: { title: payload.title, body: payload.body, deeplink: payload.deeplink },
+                android: { priority: 'high' },
+              }),
+            {
+              attempts: 3,
+              baseDelayMs: 500,
+              shouldRetry: (error) => {
+                const code = (error as { code?: string }).code;
+                return code !== 'messaging/registration-token-not-registered' && code !== 'messaging/invalid-registration-token';
+              },
+            },
+          );
         } catch (error) {
           const code = (error as { code?: string }).code;
           if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
