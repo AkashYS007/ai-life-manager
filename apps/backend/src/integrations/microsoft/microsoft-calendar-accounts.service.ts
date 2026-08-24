@@ -75,7 +75,22 @@ export class MicrosoftCalendarAccountsService {
       },
     });
 
-    await this.sync(account.id);
+    // Phantom-connected-account fix (2026-08-24, backend audit Update 49
+    // finding #8, medium severity) — same fix, same reasoning, as
+    // CalendarAccountsService's own connect() on the Google side: the row
+    // above is upserted ACTIVE with valid tokens before this first sync
+    // ever runs, so a transient failure here used to leave a silently
+    // "connected" ACTIVE row behind even though the OAuth callback
+    // controller redirects the user to an error page. Marks ERROR (not a
+    // delete — the tokens are still good, only the sync failed) and
+    // re-throws so that existing redirect-to-error-page handling is
+    // unchanged.
+    try {
+      await this.sync(account.id);
+    } catch (error) {
+      await this.prisma.calendarAccount.update({ where: { id: account.id }, data: { status: 'ERROR' } });
+      throw error;
+    }
     // Best-effort — same "an enhancement must never block the core action"
     // principle CalendarAccountsService's own connect() already documents
     // for the identical call on the Google side.
