@@ -168,6 +168,37 @@ model User {
   pushSubscriptions PushSubscription[]
   nativePushTokens  NativePushToken[]
 
+  // User FK enforcement increment (2026-08-24): the 17 relations below close
+  // a real database-level referential-integrity gap — until now these
+  // tables stored a bare `userId String` column with no Prisma/Postgres
+  // foreign key at all, so Postgres would happily accept a row pointing at
+  // a userId that doesn't exist, and deleting a user left every one of
+  // these rows orphaned instead of being cleaned up. onDelete: Cascade on
+  // each (see each model's own `user` field) matches the only precedent
+  // already in this schema (Subscription/Notification/PushSubscription/
+  // NativePushToken all already cascade) rather than inventing a new
+  // convention. `deletedAt` above is this app's actual user-delete path
+  // today (soft delete) — these constraints exist for the hard-delete case
+  // (GDPR/account-deletion requests, direct DB operations) that soft
+  // delete alone doesn't protect against.
+  goals                Goal[]
+  tasks                Task[]
+  calendarEvents       CalendarEvent[]
+  calendarAccounts     CalendarAccount[]
+  habits               Habit[]
+  moodEntries          MoodEntry[]
+  energyEntries        EnergyEntry[]
+  sleepEntries         SleepEntry[]
+  aiPlanRuns           AiPlanRun[]
+  aiRecommendationRuns AiRecommendationRun[]
+  aiConversations      AiConversation[]
+  aiMemoryFacts        AiMemoryFact[]
+  journalEntries       JournalEntry[]
+  dailyReflections     DailyReflection[]
+  routines             Routine[]
+  focusSessions        FocusSession[]
+  tags                 Tag[]
+
   @@map("users")
 }
 
@@ -206,6 +237,7 @@ enum TaskStatus {
 model Goal {
   id          String     @id @default(uuid())
   userId      String     @map("user_id")
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   description String?
   targetDate  DateTime?  @map("target_date")
@@ -224,6 +256,7 @@ model Goal {
 model Task {
   id                       String     @id @default(uuid())
   userId                   String     @map("user_id")
+  user                     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   goalId                   String?    @map("goal_id")
   goal                     Goal?      @relation(fields: [goalId], references: [id], onDelete: SetNull)
   parentTaskId             String?    @map("parent_task_id")
@@ -270,6 +303,7 @@ enum CalendarEventSource {
 model CalendarEvent {
   id                String              @id @default(uuid())
   userId            String              @map("user_id")
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   calendarAccountId String?             @map("calendar_account_id")
   calendarAccount   CalendarAccount?    @relation(fields: [calendarAccountId], references: [id], onDelete: Cascade)
   externalEventId   String?             @map("external_event_id")
@@ -312,6 +346,7 @@ enum CalendarAccountStatus {
 model CalendarAccount {
   id                    String                  @id @default(uuid())
   userId                String                  @map("user_id")
+  user                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider              CalendarAccountProvider
   externalAccountEmail  String?                 @map("external_account_email")
   // Encrypted at the application layer (token-cipher.ts) before storage —
@@ -379,6 +414,7 @@ model CalendarAccount {
 model Habit {
   id                       String    @id @default(uuid())
   userId                   String    @map("user_id")
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title                    String
   rrule                    String
   // Postgres TIME column — Prisma represents this as a Date under the hood
@@ -437,6 +473,7 @@ enum SleepSource {
 model MoodEntry {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   loggedAt  DateTime @default(now()) @map("logged_at")
   moodScore Int      @map("mood_score") // 1-5, enforced in the DTO layer (class-validator), same convention as Task.priority
   note      String?
@@ -449,6 +486,7 @@ model MoodEntry {
 model EnergyEntry {
   id          String       @id @default(uuid())
   userId      String       @map("user_id")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   loggedAt    DateTime     @default(now()) @map("logged_at")
   energyScore Int          @map("energy_score") // 1-5
   source      EnergySource @default(MANUAL)
@@ -461,6 +499,7 @@ model EnergyEntry {
 model SleepEntry {
   id               String      @id @default(uuid())
   userId           String      @map("user_id")
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   // The morning the sleep is attributed to (Database Design Document
   // §4.5), not the calendar date bedtime fell on — "last night's sleep" is
   // always sleepDate = today, which is what makes `lastNightSleep` on
@@ -517,6 +556,7 @@ enum PlanScope {
 model AiPlanRun {
   id           String        @id @default(uuid())
   userId       String        @map("user_id")
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   triggerEvent String        @map("trigger_event") // always "manual_request" this increment — event-driven triggers (Architecture §5.3) are a later increment
   status       PlanRunStatus @default(PROPOSED)
   scope        PlanScope     @default(DAY)
@@ -553,6 +593,7 @@ enum RecommendationCategory {
 model AiRecommendationRun {
   id              String   @id @default(uuid())
   userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date            DateTime @map("date") @db.Date
   recommendations Json // [{ id, category, message, dismissed }]
   modelUsed       String?  @map("model_used")
@@ -584,6 +625,7 @@ model AiRecommendationRun {
 model AiConversation {
   id            String   @id @default(uuid())
   userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Not a real AI-generated summary yet (the doc's "auto-generated summary
   // title") — just the first ~60 characters of the opening message. Cheap,
   // honest, and avoids a second AI call just to title a conversation.
@@ -639,6 +681,7 @@ model AiChatMessage {
 model AiMemoryFact {
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   factType   String   @default("preference") @map("fact_type")
   key        String
   value      Json
@@ -664,6 +707,7 @@ model AiMemoryFact {
 model JournalEntry {
   id              String   @id @default(uuid())
   userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   content         String
   sentimentScore  Float?   @map("sentiment_score")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -691,6 +735,7 @@ model JournalEntry {
 model DailyReflection {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date      DateTime @map("date") @db.Date
   answers   Json
   aiSummary String?  @map("ai_summary")
@@ -727,6 +772,7 @@ enum RoutineType {
 model Routine {
   id          String      @id @default(uuid())
   userId      String      @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        RoutineType
   checklist   Json
   aiSequenced Boolean     @default(false) @map("ai_sequenced")
@@ -789,6 +835,7 @@ enum FocusSessionStatus {
 model FocusSession {
   id                     String             @id @default(uuid())
   userId                 String             @map("user_id")
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   taskId                 String?            @map("task_id")
   task                   Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
   plannedDurationMinutes Int                @map("planned_duration_minutes")
@@ -805,6 +852,7 @@ model FocusSession {
 model Tag {
   id     String @id @default(uuid())
   userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   name   String
   color  String?
 
