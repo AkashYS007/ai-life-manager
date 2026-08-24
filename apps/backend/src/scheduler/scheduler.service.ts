@@ -146,6 +146,21 @@ function withinClockWindow(now: DateTime, hour: number): boolean {
 export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
 
+  // Overlap guard (2026-08-24, backend audit Update 49 finding #7, medium
+  // severity) — @nestjs/schedule's plain @Cron has no built-in protection
+  // against a new tick starting while the previous invocation of the same
+  // job is still running. `checkReminders` loops over every user, doing
+  // real DB work plus (for anyone in their local morning hour) a real
+  // Anthropic API call per person — at scale, or during a latency spike,
+  // one sweep can plausibly run past the next 15-minute tick. See
+  // NotificationsService's own `createLocks` for the other, deeper half of
+  // this same fix: even with this guard, two *different* cron jobs (this
+  // one and NotificationsService.deliverDueNotifications) or two unrelated
+  // callers could still race into creating a duplicate notification for
+  // the same person — that's closed at the point it's actually written,
+  // not just here at the sweep level.
+  private checkRemindersRunning = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly routinesService: RoutinesService,
@@ -203,34 +218,44 @@ export class SchedulerService {
 
   @Cron('*/15 * * * *')
   async checkReminders(): Promise<void> {
-    const users = await this.prisma.user.findMany({
-      where: { deletedAt: null },
-      select: {
-        id: true,
-        timezone: true,
-        reminderMorningRoutineHour: true,
-        reminderEveningRoutineHour: true,
-        reminderReflectionHour: true,
-        reminderHabitMinOverdueMinutes: true,
-        reminderHabitMaxOverdueMinutes: true,
-      },
-    });
+    // Overlap guard — see this class's own comment on `checkRemindersRunning`.
+    if (this.checkRemindersRunning) {
+      this.logger.warn('checkReminders sweep skipped — the previous invocation is still running.');
+      return;
+    }
+    this.checkRemindersRunning = true;
+    try {
+      const users = await this.prisma.user.findMany({
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          timezone: true,
+          reminderMorningRoutineHour: true,
+          reminderEveningRoutineHour: true,
+          reminderReflectionHour: true,
+          reminderHabitMinOverdueMinutes: true,
+          reminderHabitMaxOverdueMinutes: true,
+        },
+      });
 
-    for (const user of users) {
-      try {
-        // Settings resolved here, from the same row already fetched for
-        // this sweep, rather than letting checkRemindersForUser fetch them
-        // itself again per user — avoids doubling this query for every
-        // single user on every 15-minute tick.
-        await this.checkRemindersForUser(user.id, user.timezone, resolveReminderSettings(user));
-      } catch (error) {
-        // One person's bad data (a malformed rrule, a missing routine row)
-        // must never take down the sweep for everyone else — same
-        // "isolate the failure, keep going" principle as every other
-        // best-effort loop in this app (e.g. PlannerService.respondToPlanRun's
-        // per-task ACCEPT loop).
-        this.logger.warn(`Reminder check failed for user ${user.id}: ${(error as Error).message}`);
+      for (const user of users) {
+        try {
+          // Settings resolved here, from the same row already fetched for
+          // this sweep, rather than letting checkRemindersForUser fetch them
+          // itself again per user — avoids doubling this query for every
+          // single user on every 15-minute tick.
+          await this.checkRemindersForUser(user.id, user.timezone, resolveReminderSettings(user));
+        } catch (error) {
+          // One person's bad data (a malformed rrule, a missing routine row)
+          // must never take down the sweep for everyone else — same
+          // "isolate the failure, keep going" principle as every other
+          // best-effort loop in this app (e.g. PlannerService.respondToPlanRun's
+          // per-task ACCEPT loop).
+          this.logger.warn(`Reminder check failed for user ${user.id}: ${(error as Error).message}`);
+        }
       }
+    } finally {
+      this.checkRemindersRunning = false;
     }
   }
 
