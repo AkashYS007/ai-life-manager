@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { withRetry, DeliveryHttpError, isRetryableHttpError } from '../common/retry';
 
 interface EmailPayload {
   to: string;
@@ -37,26 +38,39 @@ export class EmailService {
     if (!this.apiKey) return;
 
     try {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: this.fromAddress,
-          to: [payload.to],
-          subject: payload.subject,
-          text: payload.body,
-        }),
-      });
+      // Delivery retry increment (backend review follow-up, 2026-08-24 —
+      // see common/retry.ts's own comment). 3 attempts total, ~500ms/
+      // ~1000ms backoff. `isRetryableHttpError` only retries a 5xx (or a
+      // thrown network error, e.g. a DNS/connect failure, which arrives as
+      // some other Error and is retried by withRetry's default
+      // always-retry behavior) — a 4xx means the request itself was wrong
+      // (bad recipient, bad auth) and three tries would just fail the same
+      // way three times.
+      await withRetry(
+        async () => {
+          const response = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: this.fromAddress,
+              to: [payload.to],
+              subject: payload.subject,
+              text: payload.body,
+            }),
+          });
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        this.logger.warn(`Resend send failed (${response.status}): ${text}`);
-      }
+          if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new DeliveryHttpError(`Resend send failed (${response.status}): ${text}`, response.status);
+          }
+        },
+        { attempts: 3, baseDelayMs: 500, shouldRetry: isRetryableHttpError },
+      );
     } catch (error) {
-      this.logger.warn(`Resend send threw: ${(error as Error).message}`);
+      this.logger.warn(`Resend send failed: ${(error as Error).message}`);
     }
   }
 }
