@@ -108,6 +108,12 @@ export class ChatResolver {
               delta: text,
               done: false,
             },
+            // Cross-account subscription fix (2026-08-24, backend audit
+            // Update 49 finding #6, medium severity) — see the
+            // `chatStreamChunk` subscription's own comment below for why
+            // this sibling field exists on the published event alongside
+            // the public GraphQL payload.
+            authProviderId: auth.authProviderId,
           });
         },
       );
@@ -119,11 +125,13 @@ export class ChatResolver {
       // (nothing renders it), ASSISTANT is just a harmless, valid default.
       this.pubSub.publish('chatStreamChunk', {
         chatStreamChunk: { requestId, role: ChatMessageRole.ASSISTANT, delta: '', done: true },
+        authProviderId: auth.authProviderId,
       });
       return { conversation, errors: [] };
     } catch (error) {
       this.pubSub.publish('chatStreamChunk', {
         chatStreamChunk: { requestId, role: ChatMessageRole.ASSISTANT, delta: '', done: true },
+        authProviderId: auth.authProviderId,
       });
       if ((error as Error).message === 'EMPTY_MESSAGE') {
         return { errors: [{ field: 'content', code: 'EMPTY_MESSAGE', message: "Message can't be empty." }] };
@@ -143,9 +151,29 @@ export class ChatResolver {
   // given subscriber actually asked about — every concurrent chat send
   // across every user publishes onto the same topic, so without this a
   // subscriber would see everyone's chunks, not just their own.
+  //
+  // Fixed 2026-08-24 (backend audit Update 49 finding #6, medium
+  // severity): the filter used to check `requestId` alone — but
+  // `requestId` is a plain client-generated correlation id (see
+  // ChatStreamChunk's own comment), never issued or validated by the
+  // server, on a single process-wide pub/sub topic. Any authenticated user
+  // who obtained (or guessed) another user's `requestId` could subscribe
+  // and receive that person's live streamed chat response. Both publish
+  // sites above now also stamp the publishing request's `authProviderId`
+  // onto the event (a sibling field, not part of the public
+  // ChatStreamChunk GraphQL type), and this filter additionally requires
+  // it to match the *subscribing* connection's own verified identity —
+  // read the same way AuthGuard/CurrentAuth do, straight from
+  // `context.req.authContext`, never from anything client-supplied. A
+  // subscriber only ever receives chunks published by their own request.
   @Subscription(() => ChatStreamChunk, {
-    filter: (payload: { chatStreamChunk: ChatStreamChunk }, variables: { requestId: string }) =>
-      payload.chatStreamChunk.requestId === variables.requestId,
+    filter: (
+      payload: { chatStreamChunk: ChatStreamChunk; authProviderId: string },
+      variables: { requestId: string },
+      context: { req?: { authContext?: { authProviderId?: string } } },
+    ) =>
+      payload.chatStreamChunk.requestId === variables.requestId &&
+      payload.authProviderId === context.req?.authContext?.authProviderId,
   })
   chatStreamChunk(@Args('requestId') requestId: string) {
     // `graphql-subscriptions` v2's real, exported API is `asyncIterator`
