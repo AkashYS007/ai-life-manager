@@ -150,9 +150,40 @@ export class TasksService {
     return task;
   }
 
+  // Ownership checks on client-supplied goalId/tagIds (backend audit
+  // Update 49 finding #4, high severity): create()/update() used to write
+  // these ids straight onto the task with no check at all — unlike
+  // parentTaskId, which already goes through requireOwnedTask just above.
+  // TASK_INCLUDE always eagerly includes `goal` and `tags`, so a task
+  // pointed at another user's goal/tag id would come back on every future
+  // read carrying that other user's goal title (or tag name/color)
+  // embedded in it. requireOwnedTags dedupes before counting so a caller
+  // repeating the same id can't be miscounted as "not all owned".
+  private async requireOwnedGoal(userId: string, id: string): Promise<void> {
+    const goal = await this.prisma.goal.findFirst({ where: { id, userId } });
+    if (!goal) {
+      throw new NotFoundException('Goal not found');
+    }
+  }
+
+  private async requireOwnedTags(userId: string, tagIds: string[]): Promise<void> {
+    if (tagIds.length === 0) return;
+    const uniqueIds = [...new Set(tagIds)];
+    const ownedCount = await this.prisma.tag.count({ where: { id: { in: uniqueIds }, userId } });
+    if (ownedCount !== uniqueIds.length) {
+      throw new NotFoundException('One or more tags not found');
+    }
+  }
+
   async create(userId: string, input: CreateTaskInput): Promise<Task> {
     if (input.parentTaskId) {
       await this.requireOwnedTask(userId, input.parentTaskId);
+    }
+    if (input.goalId) {
+      await this.requireOwnedGoal(userId, input.goalId);
+    }
+    if (input.tagIds) {
+      await this.requireOwnedTags(userId, input.tagIds);
     }
     const record = await this.prisma.task.create({
       data: {
@@ -175,6 +206,12 @@ export class TasksService {
 
   async update(userId: string, id: string, input: UpdateTaskInput): Promise<Task> {
     await this.requireOwnedTask(userId, id);
+    if (input.goalId) {
+      await this.requireOwnedGoal(userId, input.goalId);
+    }
+    if (input.tagIds) {
+      await this.requireOwnedTags(userId, input.tagIds);
+    }
 
     if (input.tagIds) {
       await this.prisma.taskTag.deleteMany({ where: { taskId: id } });
