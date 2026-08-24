@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { withRetry, DeliveryHttpError, isRetryableHttpError } from '../common/retry';
 
 interface SmsPayload {
   to: string;
@@ -47,27 +48,35 @@ export class SmsService {
         Body: payload.body,
       });
 
-      const response = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`,
-        {
-          method: 'POST',
-          headers: {
-            // Basic Auth per Twilio's own API convention — AccountSid as the
-            // username, AuthToken as the password, exactly as their docs
-            // specify (no OAuth, no bearer token for this API).
-            Authorization: `Basic ${Buffer.from(`${this.accountSid}:${this.authToken}`).toString('base64')}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: form.toString(),
-        },
-      );
+      // Delivery retry increment (backend review follow-up, 2026-08-24 —
+      // see common/retry.ts and EmailService.send's matching comment).
+      // Same 3-attempts/backoff shape, same 4xx-fails-fast reasoning.
+      await withRetry(
+        async () => {
+          const response = await fetch(
+            `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`,
+            {
+              method: 'POST',
+              headers: {
+                // Basic Auth per Twilio's own API convention — AccountSid as the
+                // username, AuthToken as the password, exactly as their docs
+                // specify (no OAuth, no bearer token for this API).
+                Authorization: `Basic ${Buffer.from(`${this.accountSid}:${this.authToken}`).toString('base64')}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: form.toString(),
+            },
+          );
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        this.logger.warn(`Twilio send failed (${response.status}): ${text}`);
-      }
+          if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new DeliveryHttpError(`Twilio send failed (${response.status}): ${text}`, response.status);
+          }
+        },
+        { attempts: 3, baseDelayMs: 500, shouldRetry: isRetryableHttpError },
+      );
     } catch (error) {
-      this.logger.warn(`Twilio send threw: ${(error as Error).message}`);
+      this.logger.warn(`Twilio send failed: ${(error as Error).message}`);
     }
   }
 }
