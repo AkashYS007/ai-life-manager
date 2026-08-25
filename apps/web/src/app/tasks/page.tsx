@@ -31,6 +31,8 @@ type Tab = 'OPEN' | 'CANCELLED';
 // makes.
 export default function TasksPage() {
   const [tab, setTab] = useState<Tab>('OPEN');
+  // Fix (frontend audit, 2026-08-25): see loadMore's own comment below.
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const {
     data: openData,
@@ -61,20 +63,37 @@ export default function TasksPage() {
   const shown = edges.map((e: any) => e.node);
   const pageInfo = activeData?.tasks?.pageInfo;
 
+  // Fix (frontend audit, 2026-08-25): two problems, same root cause. This
+  // page's own `loading` only reflects the *initial* query for a tab —
+  // Apollo's `fetchMore` doesn't flip it (that needs
+  // `notifyOnNetworkStatusChange`, not set here) — so nothing disabled the
+  // "Load more" button while a page was already in flight. A fast
+  // double-click fired `fetchMore` twice with the *same* `after` cursor
+  // (since `pageInfo` hadn't updated yet from the first call), and
+  // `updateQuery` concatenated both responses' edges with no de-duplication
+  // — the same page of tasks appended twice, rendered as duplicate rows
+  // with colliding React `key`s. `loadingMore` closes the double-click
+  // window; the `seen`-id filter in `updateQuery` is kept as a second,
+  // independent guard so a duplicate page can never make it into `edges`
+  // even if some other path (a retried request, React StrictMode's
+  // double-invoke in dev) calls this again before `loadingMore` catches it.
   function loadMore() {
-    if (!pageInfo?.hasNextPage) return;
+    if (!pageInfo?.hasNextPage || loadingMore) return;
+    setLoadingMore(true);
     fetchMore({
       variables: { after: pageInfo.endCursor },
       updateQuery: (prev: any, { fetchMoreResult }: any) => {
         if (!fetchMoreResult) return prev;
+        const seen = new Set(prev.tasks.edges.map((e: any) => e.node.id));
+        const freshEdges = fetchMoreResult.tasks.edges.filter((e: any) => !seen.has(e.node.id));
         return {
           tasks: {
             ...fetchMoreResult.tasks,
-            edges: [...prev.tasks.edges, ...fetchMoreResult.tasks.edges],
+            edges: [...prev.tasks.edges, ...freshEdges],
           },
         };
       },
-    });
+    }).finally(() => setLoadingMore(false));
   }
 
   return (
@@ -135,9 +154,10 @@ export default function TasksPage() {
           {pageInfo?.hasNextPage && (
             <button
               onClick={loadMore}
-              className="mt-1 rounded-control border border-border dark:border-border-dark px-4 py-2 text-sm font-medium text-text-primary dark:text-text-primary-dark"
+              disabled={loadingMore}
+              className="mt-1 rounded-control border border-border dark:border-border-dark px-4 py-2 text-sm font-medium text-text-primary dark:text-text-primary-dark disabled:opacity-50"
             >
-              Load more
+              {loadingMore ? 'Loading…' : 'Load more'}
             </button>
           )}
         </div>
