@@ -244,27 +244,36 @@ function OnboardingPageInner() {
   // never a lost answer or a stuck wizard.
   const [recordWizardStep] = useMutation(RECORD_ONBOARDING_WIZARD_STEP);
 
+  // Fix (frontend audit, 2026-08-25): the payload-level errors[] check was
+  // already correct, but a thrown exception (a genuine network failure, not
+  // a validation rejection) was never caught — "Saving…" reverted to
+  // "Continue" with no error shown and no indication the wizard hadn't
+  // advanced.
   async function handleQuizContinue() {
     setQuizError(null);
-    const result = await completeOnboarding({
-      variables: {
-        input: {
-          chronotype: chronotype ?? undefined,
-          workHoursStart: workHoursStart || undefined,
-          workHoursEnd: workHoursEnd || undefined,
-          quietHoursStart: quietHoursStart || undefined,
-          quietHoursEnd: quietHoursEnd || undefined,
-          overloadSource: overloadSource.trim() || undefined,
-          freeTextNotes: freeTextNotes.trim() || undefined,
+    try {
+      const result = await completeOnboarding({
+        variables: {
+          input: {
+            chronotype: chronotype ?? undefined,
+            workHoursStart: workHoursStart || undefined,
+            workHoursEnd: workHoursEnd || undefined,
+            quietHoursStart: quietHoursStart || undefined,
+            quietHoursEnd: quietHoursEnd || undefined,
+            overloadSource: overloadSource.trim() || undefined,
+            freeTextNotes: freeTextNotes.trim() || undefined,
+          },
         },
-      },
-    });
-    const payload = result.data?.completeOnboarding;
-    if (payload?.errors?.length) {
-      setQuizError(payload.errors[0].message);
-      return;
+      });
+      const payload = result.data?.completeOnboarding;
+      if (payload?.errors?.length) {
+        setQuizError(payload.errors[0].message);
+        return;
+      }
+      setStep('calendar');
+    } catch {
+      setQuizError("Couldn't save that. Try again.");
     }
-    setStep('calendar');
   }
 
   return (
