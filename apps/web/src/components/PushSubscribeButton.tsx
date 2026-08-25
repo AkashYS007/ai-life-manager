@@ -116,31 +116,33 @@ export function PushSubscribeButton() {
   async function enable() {
     setError(null);
     try {
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] enable() start, vapidPublicKey present=', !!vapidPublicKey);
       const permission = await Notification.requestPermission();
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] requestPermission resolved:', permission);
       if (permission !== 'granted') {
         setStatus(permission === 'denied' ? 'denied' : 'off');
         return;
       }
 
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] awaiting serviceWorker.ready...');
       const registration = await navigator.serviceWorker.ready;
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] serviceWorker.ready resolved, scope=', registration.scope, 'active=', !!registration.active);
 
-      // TEMPORARY diagnostic — races the real subscribe() call against a
-      // 10s timer so a hang on the browser's real, out-of-page push
-      // service (which never shows up in a Playwright page-level network
-      // trace — that traffic never goes through the page's own
-      // fetch/XHR/resource layer at all) prints unambiguous evidence
-      // instead of leaving a silent 15s locator timeout as the only clue.
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] calling pushManager.subscribe()...');
-      const subscribeStarted = Date.now();
+      // Races the real subscribe() call against a 10s timer so a hang on
+      // the browser's real, out-of-page push service (which never shows up
+      // in a Playwright page-level network trace — that traffic never goes
+      // through the page's own fetch/XHR/resource layer at all) fails
+      // loudly through the same catch block below instead of leaving the
+      // button stuck on "Enabling…" indefinitely with no way out.
+      //
+      // Fix (frontend audit, 2026-08-25): this block, and every other step
+      // in this function, used to also log its own progress via
+      // `console.log('[PUSH DEBUG] ...')` — nine call sites in total,
+      // originally added to debug the exact hang this timeout now guards
+      // against (see git history). Left in past that point, they were pure
+      // noise on every real subscribe — worse, one of them
+      // (`subscribe() resolved ... endpoint=...`) logged the subscription's
+      // real push endpoint URL, a value that uniquely identifies this
+      // device's push channel, into the browser's devtools console on every
+      // successful enable. Removed; the timeout/error-catch structure below
+      // still gives a developer a real signal (via the `console.error` in
+      // the `catch` block) without logging on every success.
       const subscription = await Promise.race([
         registration.pushManager.subscribe({
           userVisibleOnly: true,
@@ -156,26 +158,16 @@ export function PushSubscribeButton() {
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey as string) as BufferSource,
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => {
-            // eslint-disable-next-line no-console
-            console.log('[PUSH DEBUG] pushManager.subscribe() still pending after 10s');
-            reject(new Error('[PUSH DEBUG] subscribe() timed out after 10s'));
-          }, 10_000),
+          setTimeout(() => reject(new Error('Push subscription timed out after 10s')), 10_000),
         ),
       ]);
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] subscribe() resolved after', Date.now() - subscribeStarted, 'ms, endpoint=', subscription.endpoint);
       const json = subscription.toJSON();
 
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] calling registerSubscription mutation...');
       const { data } = await registerSubscription({
         variables: {
           input: { endpoint: json.endpoint, p256dh: json.keys?.p256dh, auth: json.keys?.auth },
         },
       });
-      // eslint-disable-next-line no-console
-      console.log('[PUSH DEBUG] registerSubscription resolved:', data);
 
       if (!data?.registerPushSubscription?.registered) {
         setError("We couldn't enable browser notifications. Try again.");
