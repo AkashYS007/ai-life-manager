@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Overrides the freshly-scaffolded Android project's WebViewClient to fix a
-real, confirmed bug in how Capacitor decides a navigation is "external" to
-the app. Run *after* `npx cap add android` (which creates MainActivity.java
-in the first place) and *before* `npx cap sync android`, same ordering as
-apply_icons.py and apply_firebase_config.py, for the same reason: android/
-is regenerated from scratch on every CI run, so this has to be re-applied
-here rather than committed as edited native source.
+"""Overrides the freshly-scaffolded Android project's MainActivity to (1) fix
+a real, confirmed bug in how Capacitor decides a navigation is "external" to
+the app, and (2) make a tapped push notification's deep link actually
+navigate the app instead of silently doing nothing. Run *after* `npx cap add
+android` (which creates MainActivity.java in the first place) and *before*
+`npx cap sync android`, same ordering as apply_icons.py and
+apply_firebase_config.py, for the same reason: android/ is regenerated from
+scratch on every CI run, so this has to be re-applied here rather than
+committed as edited native source.
 
-Bug (found + confirmed 2026-08-20): Capacitor's own
+Bug 1 (found + confirmed 2026-08-20): Capacitor's own
 BridgeWebViewClient.shouldOverrideUrlLoading (see
 node_modules/@capacitor/android/.../BridgeWebViewClient.java) calls
 Bridge.launchIntent() for EVERY navigation-type WebResourceRequest it sees,
@@ -30,6 +32,21 @@ the user actually tapping an external link) still goes through Capacitor's
 normal handling and correctly opens in the system browser -- only
 background/sub-frame requests are exempted, which is what should have been
 happening all along.
+
+Bug 2 (found 2026-08-24, mobile app review follow-up): AiLifeManagerMessagingService.
+showBanner() (see apply_native_notifications.py) attaches a `deeplink` extra
+(e.g. "/routines") to the PendingIntent it builds for a tapped push
+notification -- but until this fix, nothing on the Android side ever read
+that extra back out. Tapping a push notification just opened MainActivity
+(or brought it to the foreground) wherever its WebView already was, silently
+dropping the one piece of information the notification was actually about --
+compare apps/web/public/sw.js's own notificationclick handler, which already
+does this correctly for the browser/PWA path. handleDeeplinkIntent() below is
+the fix, called from both entry points a tapped notification can take: a
+cold/fresh launch goes through onCreate; if MainActivity is already running
+in the task stack (likely, since the PendingIntent sets
+FLAG_ACTIVITY_CLEAR_TOP), Android reuses that instance and delivers the new
+Intent to onNewIntent instead, which never calls onCreate at all.
 """
 import os
 
@@ -42,6 +59,7 @@ MAIN_ACTIVITY = os.path.join(
 
 CONTENT = """package com.genzylife.ailifemanager;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -78,6 +96,37 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         );
+        handleDeeplinkIntent(getIntent());
+    }
+
+    // Notification deep-link fix (2026-08-24) -- see apply_webview_navigation_fix.py's
+    // own module comment (Bug 2) for the full story. A tapped push
+    // notification can deliver its Intent through either entry point
+    // depending on whether MainActivity is already alive in the task stack,
+    // so both are wired to the same handler.
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleDeeplinkIntent(intent);
+    }
+
+    private void handleDeeplinkIntent(Intent intent) {
+        if (intent == null) return;
+        String deeplink = intent.getStringExtra("deeplink");
+        if (deeplink == null || deeplink.isEmpty()) return;
+        // deeplink only ever originates from this app's own backend
+        // (NativePushService.sendToUser's payload, itself only ever built
+        // from a handful of hardcoded literal paths in this repo's own
+        // scheduler/planner/recommendations/focus services and
+        // NotificationsService -- never from user input), so this can never
+        // actually see anything else in practice. Validated anyway, the same
+        // "defend the boundary even when the value is already trusted"
+        // discipline AuthGuard and every DTO validator in this codebase
+        // already follow -- a same-origin relative path only, so a
+        // malformed or unexpected value can never make the WebView load an
+        // arbitrary external origin.
+        if (!deeplink.startsWith("/") || deeplink.startsWith("//")) return;
+        bridge.getWebView().loadUrl("https://www.genzylife.com" + deeplink);
     }
 }
 """
