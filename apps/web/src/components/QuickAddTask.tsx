@@ -25,6 +25,7 @@ export function QuickAddTask() {
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState('');
   const [goalId, setGoalId] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const { data: goalsData } = useQuery(GOALS_QUERY, { variables: { status: 'ACTIVE' }, errorPolicy: 'ignore' });
   const [createTask, { loading }] = useMutation(CREATE_TASK, {
     refetchQueries: [{ query: TODAY_PLAN_QUERY }],
@@ -39,6 +40,7 @@ export function QuickAddTask() {
     e.preventDefault();
     const trimmed = title.trim();
     if (!trimmed) return;
+    setSubmitError(null);
     const estimatedDurationMinutes = duration.trim() ? parseInt(duration, 10) : undefined;
     const variables = { title: trimmed, estimatedDurationMinutes, goalId: goalId || undefined };
 
@@ -52,7 +54,19 @@ export function QuickAddTask() {
       enqueue('createTask', variables);
     } else {
       try {
-        await createTask({ variables });
+        const result = await createTask({ variables });
+        // Fix (frontend audit, 2026-08-25): a server-side validation
+        // rejection comes back as this payload's own `errors[]`, not a
+        // thrown exception — previously never checked, so a rejected task
+        // silently cleared the form as if it had been created. Deliberately
+        // NOT queued for offline retry (unlike the thrown-exception branch
+        // below) since a genuine rejection would just fail the same way
+        // again.
+        const payloadErrors = result.data?.createTask?.errors;
+        if (payloadErrors?.length) {
+          setSubmitError(payloadErrors[0].message ?? "Couldn't add that task. Try again.");
+          return;
+        }
       } catch {
         // A flaky connection that looked online a moment ago — same
         // fallback path as the explicit offline check above, so a
@@ -132,6 +146,12 @@ export function QuickAddTask() {
             </option>
           ))}
         </select>
+      )}
+
+      {submitError && (
+        <p className="text-xs text-danger dark:text-danger-dark" role="alert">
+          {submitError}
+        </p>
       )}
     </form>
   );
