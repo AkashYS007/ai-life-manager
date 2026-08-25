@@ -91,6 +91,18 @@ export default function ChatPage() {
   // handleSend started would miss chunks that arrived afterward).
   const [completedAnnouncement, setCompletedAnnouncement] = useState('');
   const segmentsRef = useRef<StreamSegment[]>([]);
+  // Fix (frontend audit, 2026-08-25): "New chat" is a plain button, not
+  // blocked by `sending` the way the Send button is — so clicking it while
+  // a send is still in flight was possible, and that send's `await` would
+  // eventually resolve and call setConversationId(payload.conversation.id)
+  // regardless, silently pulling the person back into the conversation
+  // they'd just explicitly left. This ref is the source of truth for
+  // "which send, if any, is still allowed to apply its result" — handleSend
+  // stamps its own requestId in here before awaiting, "New chat" clears it,
+  // and every post-await state update below checks it's still current
+  // before touching anything the person could have already navigated away
+  // from.
+  const currentRequestIdRef = useRef<string | null>(null);
 
   const { data: listData } = useQuery(AI_CONVERSATIONS_QUERY);
   const { data: threadData, loading: threadLoading } = useQuery(AI_CONVERSATION_QUERY, {
@@ -137,6 +149,7 @@ export default function ChatPage() {
     setError(null);
 
     const requestId = crypto.randomUUID();
+    currentRequestIdRef.current = requestId;
     setStreamingSegments([]);
     segmentsRef.current = [];
     setCompletedAnnouncement('');
@@ -152,6 +165,14 @@ export default function ChatPage() {
           : [{ query: AI_CONVERSATIONS_QUERY }],
       });
 
+      // Fix (frontend audit, 2026-08-25): "New chat" (or another send)
+      // could have superseded this one while the mutation was in flight —
+      // see currentRequestIdRef's own comment above. The reply that just
+      // came back belongs to whatever conversation this request started
+      // against, which isn't necessarily what's on screen anymore; applying
+      // it now would silently undo the person's own navigation.
+      if (currentRequestIdRef.current !== requestId) return;
+
       const payload = result.data?.sendChatMessageStreaming;
       if (payload?.errors?.length) {
         setError(payload.errors[0].message);
@@ -160,22 +181,38 @@ export default function ChatPage() {
 
       setConversationId(payload.conversation.id);
       setInput('');
+    } catch {
+      // Fix (frontend audit, 2026-08-25): a genuine thrown exception (a
+      // network failure, not a validation rejection) was never caught —
+      // this whole function is invoked from a form's onSubmit, which
+      // doesn't await it or catch anything itself, so the send silently
+      // failed as an unhandled rejection: no error shown, and "Send"
+      // stayed disabled until the mutation's own loading state gave up.
+      if (currentRequestIdRef.current === requestId) {
+        setError("Couldn't send that message. Try again.");
+      }
     } finally {
       // Announce the complete reply once, from the ref (not the possibly-
       // stale `streamingSegments` state this closure captured when the
-      // send started) — see segmentsRef's own comment above.
-      const finalSegments = segmentsRef.current;
-      if (finalSegments.length > 0) {
-        setCompletedAnnouncement(
-          finalSegments
-            .map((s) => (s.role === 'TOOL' ? `Action taken: ${s.text}` : s.text))
-            .join(' '),
-        );
+      // send started) — see segmentsRef's own comment above. Same
+      // still-current check as above — a superseded send has nothing left
+      // worth announcing.
+      if (currentRequestIdRef.current === requestId) {
+        const finalSegments = segmentsRef.current;
+        if (finalSegments.length > 0) {
+          setCompletedAnnouncement(
+            finalSegments
+              .map((s) => (s.role === 'TOOL' ? `Action taken: ${s.text}` : s.text))
+              .join(' '),
+          );
+        }
       }
       // Either the real, final assistant message is now in the refetched
       // AI_CONVERSATION_QUERY data (success), or nothing was ever
       // persisted (error) — either way, the locally-accumulated streaming
       // bubble has nothing left to contribute and should stop rendering.
+      // Cleared unconditionally (unlike the state above) since this send is
+      // done either way and the subscription it opened should stop.
       setStreamingRequestId(null);
     }
   }
@@ -187,6 +224,9 @@ export default function ChatPage() {
         {conversationId && (
           <button
             onClick={() => {
+              // Fix (frontend audit, 2026-08-25): invalidates any send still
+              // in flight — see currentRequestIdRef's own comment above.
+              currentRequestIdRef.current = null;
               setConversationId(null);
               setError(null);
             }}
