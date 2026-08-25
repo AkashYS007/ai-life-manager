@@ -27,8 +27,24 @@ interface GoalRow {
   linkedHabitCount: number;
 }
 
+// Fix (frontend audit, 2026-08-25): `targetDate` is a calendar date (just
+// a day, no meaningful time-of-day) but the backend's DateTime scalar
+// serializes it as UTC midnight — e.g. picking "Aug 25" in the create-goal
+// form (below) sends "2026-08-25T00:00:00.000Z". Formatting that with the
+// viewer's *local* timezone (the old behavior, no `timeZone` option) rolls
+// the displayed date back a full day for anyone west of UTC: 2026-08-25T00
+// :00 UTC is still 2026-08-24 evening in, say, America/Los_Angeles.
+// Formatting in UTC instead reconstructs exactly the calendar date that was
+// picked, regardless of the viewer's own timezone — correct because the
+// value was always UTC-midnight-anchored on the way in, not a real moment
+// in time with a timezone-sensitive time-of-day.
 function formatTargetDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 const TABS: { label: string; status: GoalStatus }[] = [
