@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import Link from 'next/link';
 import {
@@ -94,10 +94,20 @@ function PreferencesForm() {
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [initialized, setInitialized] = useState(false);
+  // Fix (frontend audit, 2026-08-25): matches the same fix on
+  // settings/page.tsx (see its own comment for the full reasoning) — this
+  // form used to sync from `data.me` exactly once, on whichever `data.me`
+  // it saw first. `dirty` lets the effect below keep re-syncing from
+  // `data.me` for as long as the person hasn't started editing (every
+  // setter below is paired with `setDirty(true)`), so a later external
+  // change — a refetch after save, a slower-arriving network response —
+  // still reaches the form, without ever overwriting in-progress edits.
+  const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!initialized && data?.me) {
+  useEffect(() => {
+    if (dirty || !data?.me) return;
     setQuietHoursStart(data.me.quietHoursStart ?? '');
     setQuietHoursEnd(data.me.quietHoursEnd ?? '');
     setPushEnabled(data.me.pushNotificationsEnabled);
@@ -105,7 +115,8 @@ function PreferencesForm() {
     setSmsEnabled(data.me.smsNotificationsEnabled);
     setPhoneNumber(data.me.phoneNumber ?? '');
     setInitialized(true);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.me, dirty]);
 
   const [updatePreferences, { loading: saving }] = useMutation(UPDATE_NOTIFICATION_PREFERENCES, {
     refetchQueries: [{ query: NOTIFICATION_PREFERENCES_QUERY }],
@@ -138,6 +149,9 @@ function PreferencesForm() {
         return;
       }
       setSaved(true);
+      // The refetch this mutation triggers reflects exactly what was just
+      // saved — safe to let the sync effect above apply it once it lands.
+      setDirty(false);
     } catch {
       // A malformed phone number that slipped past the loose client-side
       // check above still gets caught server-side (UpdateNotificationPreferencesInput's
@@ -162,7 +176,7 @@ function PreferencesForm() {
           <input
             type="time"
             value={quietHoursStart}
-            onChange={(e) => setQuietHoursStart(e.target.value)}
+            onChange={(e) => { setDirty(true); setQuietHoursStart(e.target.value); }}
             className="ml-2 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
           />
         </label>
@@ -171,7 +185,7 @@ function PreferencesForm() {
           <input
             type="time"
             value={quietHoursEnd}
-            onChange={(e) => setQuietHoursEnd(e.target.value)}
+            onChange={(e) => { setDirty(true); setQuietHoursEnd(e.target.value); }}
             className="ml-2 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
           />
         </label>
@@ -182,15 +196,15 @@ function PreferencesForm() {
 
       <div className="mb-3 flex flex-col gap-2">
         <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
-          <input type="checkbox" checked={pushEnabled} onChange={(e) => setPushEnabled(e.target.checked)} />
+          <input type="checkbox" checked={pushEnabled} onChange={(e) => { setDirty(true); setPushEnabled(e.target.checked); }} />
           In-app notifications
         </label>
         <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
-          <input type="checkbox" checked={emailEnabled} onChange={(e) => setEmailEnabled(e.target.checked)} />
+          <input type="checkbox" checked={emailEnabled} onChange={(e) => { setDirty(true); setEmailEnabled(e.target.checked); }} />
           Email
         </label>
         <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
-          <input type="checkbox" checked={smsEnabled} onChange={(e) => setSmsEnabled(e.target.checked)} />
+          <input type="checkbox" checked={smsEnabled} onChange={(e) => { setDirty(true); setSmsEnabled(e.target.checked); }} />
           SMS
         </label>
       </div>
@@ -207,7 +221,7 @@ function PreferencesForm() {
         <input
           type="tel"
           value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
+          onChange={(e) => { setDirty(true); setPhoneNumber(e.target.value); }}
           placeholder="+15551234567"
           aria-label="Phone number for SMS notifications"
           // Screen-reader pass: the only client-side validation this form
