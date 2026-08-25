@@ -13,6 +13,7 @@ import {
   POMODORO_SETTINGS_QUERY,
 } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
 const DURATION_PRESETS = [25, 5, 50];
 
@@ -207,7 +208,20 @@ function FocusPageContent() {
     };
   }, []);
 
-  const { data: activeData, loading: activeLoading } = useQuery(ACTIVE_FOCUS_SESSION_QUERY);
+  // Fix (frontend audit, 2026-08-25): previously only `data`/`loading` were
+  // read from this query, so a genuine query failure (network error,
+  // GraphQL error) left `activeData` undefined and fell straight through to
+  // the "no active session" empty state below — indistinguishable from
+  // actually having no session in progress. Destructuring `error` (and
+  // `refetch` for a retry action) lets the render branch below show it
+  // instead, matching the QueryErrorNotice pattern already used for
+  // COMPLETED_TASKS_QUERY in more/page.tsx.
+  const {
+    data: activeData,
+    loading: activeLoading,
+    error: activeError,
+    refetch: refetchActive,
+  } = useQuery(ACTIVE_FOCUS_SESSION_QUERY);
   const { data: recentData } = useQuery(RECENT_FOCUS_SESSIONS_QUERY, { variables: { first: 5 } });
   // Configurable Pomodoro durations increment: deliberately network-only,
   // not the default cache-first. The persisted cache (see apollo-client.ts's
@@ -353,9 +367,13 @@ function FocusPageContent() {
         </div>
       )}
 
+      {activeError && (
+        <QueryErrorNotice error={activeError} what="your focus session" onRetry={() => refetchActive()} />
+      )}
+
       {activeLoading ? (
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
-      ) : activeSession ? (
+      ) : activeError ? null : activeSession ? (
         <ActiveSessionView
           session={activeSession}
           onComplete={handleComplete}
