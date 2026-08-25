@@ -41,7 +41,22 @@
 // installed via "Add to Home Screen," is a separate OS-level snapshot
 // this cache bump can't touch — that only refreshes when Chrome's
 // periodic WebAPK update check runs, or the user removes and re-adds it.)
-const CACHE_NAME = 'ailm-shell-v3';
+// v4 (frontend audit, 2026-08-25): the v2 fix above only ever covered a
+// full document load — `request.mode === 'navigate'` /
+// `destination === 'document'`. It never covered the fetch requests the
+// App Router itself issues for a client-side ("soft") navigation, e.g.
+// clicking a <Link> — those are plain same-origin GET fetches with neither
+// property set, so they fell straight through to the
+// stale-while-revalidate branch below and could serve a cached response
+// (from before a sign-out, or from a different signed-in account on a
+// shared device) without ever re-asking the network, the exact bug class
+// v2 fixed for full loads, just for the other navigation path. Next.js
+// marks these requests with an `RSC: 1` request header (and, on most
+// versions, a `Next-Router-State-Tree` header) — checking for either below
+// is what folds them into the same always-hits-the-network handling as a
+// full page load. Cache name bumped so activate's cleanup evicts any RSC
+// response a pre-fix client already cached under the old, wrong strategy.
+const CACHE_NAME = 'ailm-shell-v4';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -74,7 +89,9 @@ self.addEventListener('fetch', (event) => {
   // bug this fixes. Only fall back to whatever's cached if the network is
   // genuinely unreachable (offline), which is the actual case this
   // fallback exists for.
-  const isNavigation = request.mode === 'navigate' || request.destination === 'document';
+  const isRscNavigation =
+    request.headers.get('RSC') === '1' || request.headers.has('Next-Router-State-Tree');
+  const isNavigation = request.mode === 'navigate' || request.destination === 'document' || isRscNavigation;
   if (isNavigation) {
     event.respondWith(
       fetch(request)
