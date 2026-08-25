@@ -13,17 +13,34 @@ import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 // both read as real context on every request.
 export default function MemoryPage() {
   const [content, setContent] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const { data, loading, error, refetch } = useQuery(MEMORY_FACTS_QUERY);
   const [createFact, { loading: creating }] = useMutation(CREATE_MEMORY_FACT, {
     refetchQueries: [{ query: MEMORY_FACTS_QUERY }],
   });
 
+  // Fix (frontend audit, 2026-08-25): the mutation result was previously
+  // discarded entirely — a server-side validation rejection (returned as
+  // this payload's own `errors[]`, not a thrown exception, same convention
+  // every other mutation in this codebase follows) still cleared the input
+  // as if the fact had been saved, with no error shown anywhere. Now checks
+  // the payload and a genuine thrown/network error separately.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = content.trim();
     if (!trimmed) return;
-    await createFact({ variables: { content: trimmed } });
-    setContent('');
+    setSubmitError(null);
+    try {
+      const result = await createFact({ variables: { content: trimmed } });
+      const payloadErrors = result.data?.createMemoryFact?.errors;
+      if (payloadErrors?.length) {
+        setSubmitError(payloadErrors[0].message ?? "Couldn't save that. Try again.");
+        return;
+      }
+      setContent('');
+    } catch {
+      setSubmitError("Couldn't save that. Try again.");
+    }
   }
 
   const facts = data?.memoryFacts ?? [];
@@ -54,6 +71,12 @@ export default function MemoryPage() {
           Add
         </button>
       </form>
+
+      {submitError && (
+        <p className="mx-4 mb-3 text-xs text-danger dark:text-danger-dark" role="alert">
+          {submitError}
+        </p>
+      )}
 
       {loading && (
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
