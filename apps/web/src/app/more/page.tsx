@@ -39,12 +39,21 @@ function CompletedTaskRow({ id, title, completedAt }: { id: string; title: strin
     refetchQueries: [{ query: COMPLETED_TASKS_QUERY }, { query: TODAY_PLAN_QUERY }],
   });
 
+  // Fix (frontend audit, 2026-08-25): the payload-level errors[] check was
+  // already correct, but a thrown exception (a genuine network failure, not
+  // a validation rejection) was never caught — it surfaced only as an
+  // unhandled promise rejection, with `loading` resetting and no message
+  // ever shown.
   async function handleUndo() {
     setError(null);
-    const result = await reopenTask();
-    const errors = result.data?.reopenTask?.errors ?? [];
-    if (errors.length > 0) {
-      setError(errors[0].message ?? "Couldn't reopen that task. Try again.");
+    try {
+      const result = await reopenTask();
+      const errors = result.data?.reopenTask?.errors ?? [];
+      if (errors.length > 0) {
+        setError(errors[0].message ?? "Couldn't reopen that task. Try again.");
+      }
+    } catch {
+      setError("Couldn't reopen that task. Try again.");
     }
   }
 
