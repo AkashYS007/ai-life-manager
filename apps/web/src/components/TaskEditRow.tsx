@@ -38,6 +38,18 @@ function dueDateToInputValue(iso?: string | null) {
 export function TaskEditRow({ task, goals }: { task: TaskListItem; goals: GoalOption[] }) {
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Fix (frontend audit, 2026-08-25): the Save button's disabled state used
+  // to be tied only to `saving`, the UPDATE_TASK mutation's own `loading`
+  // flag — but handleSave (below) does a round of async tag-resolution
+  // (`await createTag(...)` per typed tag) *before* it ever calls
+  // updateTask. `saving` stays false for that whole stretch, so the button
+  // was clickable again during it: a fast double-click (or a keyboard
+  // Enter-Enter) could fire handleSave a second time while the first call
+  // was still mid-flight, racing two concurrent updateTask calls (and two
+  // rounds of tag creation) for the same task. `submitting` covers the
+  // entire handleSave lifetime — tag resolution included — so the button
+  // stays disabled for the whole operation, not just the tail end of it.
+  const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
   const [priority, setPriority] = useState(task.priority);
@@ -53,7 +65,7 @@ export function TaskEditRow({ task, goals }: { task: TaskListItem; goals: GoalOp
   // moves it from Open to Cancelled — the other tab's list needs to know
   // too, not just this one.
   const refetchQueries = [{ query: OPEN_TASKS_QUERY }, { query: CANCELLED_TASKS_QUERY }, { query: TODAY_PLAN_QUERY }];
-  const [updateTask, { loading: saving }] = useMutation(UPDATE_TASK, { refetchQueries });
+  const [updateTask] = useMutation(UPDATE_TASK, { refetchQueries });
   const [cancelTask, { loading: cancelling }] = useMutation(CANCEL_TASK, { refetchQueries });
   const [createTag] = useMutation(CREATE_TAG);
 
@@ -69,49 +81,59 @@ export function TaskEditRow({ task, goals }: { task: TaskListItem; goals: GoalOp
   }
 
   async function handleSave() {
+    // Belt-and-suspenders against the double-submit window this whole
+    // function used to leave open (see `submitting`'s own comment above) —
+    // a second call arriving while the first is still mid-flight is a
+    // no-op rather than a second round of tag creation/update.
+    if (submitting) return;
+
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       setError('Title is required.');
       return;
     }
     setError(null);
+    setSubmitting(true);
+    try {
+      // Resolve each typed tag name to a real id. createTag upserts by name
+      // (see CREATE_TAG's own comment), so this is safe to call for a tag
+      // that already exists — it just returns that same tag, never a
+      // duplicate.
+      const tagNames = [...new Set(tagsText.split(',').map((t) => t.trim()).filter(Boolean))];
+      const tagIds: string[] = [];
+      for (const name of tagNames) {
+        const result = await createTag({ variables: { input: { name } } });
+        const tagPayload = result.data?.createTag;
+        if (tagPayload?.errors?.length) {
+          setError(tagPayload.errors[0].message);
+          return;
+        }
+        if (tagPayload?.tag?.id) tagIds.push(tagPayload.tag.id);
+      }
 
-    // Resolve each typed tag name to a real id. createTag upserts by name
-    // (see CREATE_TAG's own comment), so this is safe to call for a tag
-    // that already exists — it just returns that same tag, never a
-    // duplicate.
-    const tagNames = [...new Set(tagsText.split(',').map((t) => t.trim()).filter(Boolean))];
-    const tagIds: string[] = [];
-    for (const name of tagNames) {
-      const result = await createTag({ variables: { input: { name } } });
-      const tagPayload = result.data?.createTag;
-      if (tagPayload?.errors?.length) {
-        setError(tagPayload.errors[0].message);
+      const result = await updateTask({
+        variables: {
+          id: task.id,
+          input: {
+            title: trimmedTitle,
+            description: description.trim() || null,
+            priority,
+            dueDate: dueDate ? new Date(dueDate).toISOString() : null,
+            estimatedDurationMinutes: duration.trim() ? parseInt(duration, 10) : null,
+            goalId: goalId || null,
+            tagIds,
+          },
+        },
+      });
+      const payload = result.data?.updateTask;
+      if (payload?.errors?.length) {
+        setError(payload.errors[0].message);
         return;
       }
-      if (tagPayload?.tag?.id) tagIds.push(tagPayload.tag.id);
+      setIsEditing(false);
+    } finally {
+      setSubmitting(false);
     }
-
-    const result = await updateTask({
-      variables: {
-        id: task.id,
-        input: {
-          title: trimmedTitle,
-          description: description.trim() || null,
-          priority,
-          dueDate: dueDate ? new Date(dueDate).toISOString() : null,
-          estimatedDurationMinutes: duration.trim() ? parseInt(duration, 10) : null,
-          goalId: goalId || null,
-          tagIds,
-        },
-      },
-    });
-    const payload = result.data?.updateTask;
-    if (payload?.errors?.length) {
-      setError(payload.errors[0].message);
-      return;
-    }
-    setIsEditing(false);
   }
 
   async function handleCancelTask() {
@@ -258,11 +280,11 @@ export function TaskEditRow({ task, goals }: { task: TaskListItem; goals: GoalOp
         )}
         <div className="flex gap-2">
           <button
-            disabled={saving}
+            disabled={submitting}
             onClick={handleSave}
             className="rounded-control bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {saving ? 'Saving…' : 'Save'}
+            {submitting ? 'Saving…' : 'Save'}
           </button>
           <button
             onClick={() => {
