@@ -68,6 +68,30 @@ function RoutineEditor({ type, existing }: { type: 'MORNING' | 'EVENING'; existi
     }
   }
 
+  // Fix (frontend audit, 2026-08-25): the Delete button used to call
+  // `deleteRoutine` directly in its `onClick` with no error handling at
+  // all — no payload-`errors` check, no `catch`. A rejected mutation (a
+  // network error) or a payload-level error (see DELETE_ROUTINE's own
+  // `errors` field) both failed completely silently: the button's
+  // `disabled={deleting}` flips back off once the promise settles either
+  // way, so the only visible sign anything happened was the button
+  // returning to its normal state, indistinguishable from a real delete
+  // having gone through. Wired to this component's existing `error` state
+  // (the same one `save` above already uses) so a failure shows the same
+  // way a failed save already does.
+  async function handleDelete() {
+    setError(null);
+    try {
+      const result = await deleteRoutine({ variables: { type } });
+      const errors = result.data?.deleteRoutine?.errors ?? [];
+      if (errors.length > 0) {
+        setError(errors[0].message ?? "Couldn't delete that routine. Try again.");
+      }
+    } catch {
+      setError("Couldn't delete that routine. Try again.");
+    }
+  }
+
   return (
     <div className="mx-4 mb-4 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
       <h2 className="mb-3 text-sm font-medium text-text-primary dark:text-text-primary-dark">
@@ -130,7 +154,7 @@ function RoutineEditor({ type, existing }: { type: 'MORNING' | 'EVENING'; existi
         </button>
         {existing && (
           <button
-            onClick={() => deleteRoutine({ variables: { type } })}
+            onClick={handleDelete}
             disabled={deleting}
             className="text-xs text-text-secondary hover:text-danger dark:hover:text-danger-dark dark:text-text-secondary-dark"
           >
