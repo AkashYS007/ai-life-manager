@@ -81,7 +81,23 @@ export default function CalendarPage() {
     { query: TODAY_PLAN_QUERY },
   ];
 
-  const label = rangeStart.toJSDate().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  // Fix (frontend audit, 2026-08-25): `rangeStart` above is correctly
+  // anchored to the account's stored `timezone` via Luxon's `setZone` — but
+  // `.toJSDate()` collapses that back down to a plain JS `Date` (just an
+  // absolute instant, with no zone attached), and `.toLocaleDateString`
+  // with no `timeZone` option then renders it in whatever zone the
+  // *browser* is currently running in. For any account whose stored zone
+  // has drifted from the browser's live zone (a new device, a `timezone`
+  // that hasn't synced yet — see TimezoneSync.tsx), that silently
+  // reintroduces the exact "two zones only agree by coincidence" gap the
+  // comment above already fixed for the actual day-bucketing logic; the
+  // label could show the wrong weekday/date for the range of events
+  // actually being displayed. Luxon's own `toLocaleString` formats using
+  // the zone already attached to the `DateTime` instance, so staying on
+  // `rangeStart` directly (no `toJSDate()` round-trip) keeps the label
+  // correctly anchored to the account's timezone same as the data it's
+  // labeling.
+  const label = rangeStart.toLocaleString({ weekday: 'long', month: 'long', day: 'numeric' });
   const isToday = dayOffset === 0;
 
   return (
