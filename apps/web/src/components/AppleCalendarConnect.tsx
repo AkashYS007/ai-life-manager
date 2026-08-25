@@ -23,7 +23,13 @@ export function AppleCalendarConnect({ refetchQueries }: { refetchQueries: any[]
   const [connectError, setConnectError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
-  const { data, loading } = useQuery(APPLE_CALENDAR_ACCOUNT);
+  // Fix (frontend audit, 2026-08-25): 'cache-first' (the Apollo default)
+  // could keep showing "Connect Apple Calendar" forever after a real
+  // connection existed, or vice versa — same stale-cache class this app's
+  // localStorage-persisted Apollo cache already forced a fix for on
+  // Google/Microsoft's own connect components (see those files' matching
+  // comment). Always re-asks the network, same as Google/Microsoft.
+  const { data, loading } = useQuery(APPLE_CALENDAR_ACCOUNT, { fetchPolicy: 'cache-and-network' });
   const [connect, { loading: connecting }] = useMutation(CONNECT_APPLE_CALENDAR, {
     refetchQueries: [{ query: APPLE_CALENDAR_ACCOUNT }, ...refetchQueries],
   });
