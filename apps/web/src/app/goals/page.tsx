@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { CREATE_GOAL, GOALS_QUERY, UPDATE_GOAL } from '../../lib/queries';
+import { ALL_GOALS_QUERY, CREATE_GOAL, GOALS_QUERY, UPDATE_GOAL } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
 import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 
@@ -157,7 +157,21 @@ function NewGoalForm({ refetchQueries }: { refetchQueries: any[] }) {
   const [targetDate, setTargetDate] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const [createGoal, { loading }] = useMutation(CREATE_GOAL, { refetchQueries });
+  // Fix (frontend audit, 2026-08-25): `refetchQueries` here only ever
+  // refetched this page's own `GOALS_QUERY` for the currently-active tab —
+  // it never included `ALL_GOALS_QUERY`, the unfiltered "every goal, any
+  // status" query the Tasks and Habits pages both use to populate their
+  // goal-linking picker dropdowns. Those queries default to `cache-first`,
+  // so a goal created here stayed invisible in either picker until
+  // something else independently refetched it (a hard reload, a fresh
+  // mount) — creating a goal and immediately going to link a task to it was
+  // a real, reachable gap. Adding it to *this* mutation's refetchQueries
+  // (create only, not the shared `refetchQueries` prop GoalRowView's own
+  // updateGoal also uses below) keeps both pickers current the moment a new
+  // goal exists, without also re-running it on every status change.
+  const [createGoal, { loading }] = useMutation(CREATE_GOAL, {
+    refetchQueries: [...refetchQueries, { query: ALL_GOALS_QUERY }],
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
