@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@apollo/client';
@@ -150,6 +150,8 @@ export default function SettingsPage() {
   const [reflectionChallengingLabel, setReflectionChallengingLabel] = useState('');
   const [reflectionCarryForwardLabel, setReflectionCarryForwardLabel] = useState('');
   const [initialized, setInitialized] = useState(false);
+  // See the sync-effect comment below for why this exists.
+  const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,7 +167,26 @@ export default function SettingsPage() {
   // form.
   const [tierError, setTierError] = useState<string | null>(null);
 
-  if (!initialized && data?.me) {
+  // Fix (frontend audit, 2026-08-25): this used to be a one-shot `if
+  // (!initialized && data?.me)` snapshot taken in the render body — it only
+  // ever populated the form from the *first* truthy `data.me` it saw. With
+  // this query on cache-and-network (see the comment above), that first
+  // truthy value is very often the stale cache paint, not the network
+  // response that follows a moment later — the exact same two-phase race
+  // already confirmed live for the reminder-hour fields (see that comment).
+  // Once `initialized` flipped true from the stale paint, the real network
+  // response landing afterward was silently discarded and the form was left
+  // showing outdated values the person could then "Save" right back over
+  // whatever was actually current. `dirty` is what makes it safe to keep
+  // re-syncing beyond that first paint: the effect below re-applies
+  // `data.me` any time it changes for as long as the person hasn't started
+  // editing, and stops the moment they touch a field (every setter below is
+  // paired with `setDirty(true)`) so a later external change — the network
+  // response, a post-save refetch, another tab — never clobbers in-progress
+  // typing. A successful save resets `dirty` back to false, since the
+  // refetch it triggers reflects exactly what was just saved.
+  useEffect(() => {
+    if (dirty || !data?.me) return;
     setDisplayName(data.me.displayName ?? '');
     setTimezone(data.me.timezone ?? '');
     setTimezoneManual(data.me.timezoneManual ?? false);
@@ -185,7 +206,8 @@ export default function SettingsPage() {
     setReflectionChallengingLabel(data.me.reflectionChallengingLabel ?? '');
     setReflectionCarryForwardLabel(data.me.reflectionCarryForwardLabel ?? '');
     setInitialized(true);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.me, dirty]);
 
   const [updateSettings, { loading: saving }] = useMutation(UPDATE_SETTINGS, {
     refetchQueries: [{ query: SETTINGS_QUERY }],
@@ -243,6 +265,11 @@ export default function SettingsPage() {
         return;
       }
       setSaved(true);
+      // The refetch this mutation triggers reflects exactly what was just
+      // saved, so it's safe — and correct — to let the sync effect above
+      // apply it once it lands, rather than leaving the form permanently
+      // frozen at the values from the moment editing started.
+      setDirty(false);
     } catch {
       setError("Couldn't save those settings. Try again.");
     }
@@ -253,6 +280,7 @@ export default function SettingsPage() {
   // Save immediately reflects what TimezoneSync would have set on its own
   // rather than leaving a stale manually-typed value sitting in the input.
   function useAutomaticTimezone() {
+    setDirty(true);
     setTimezoneManual(false);
     if (browserDetected) setTimezone(browserDetected);
   }
@@ -387,7 +415,7 @@ export default function SettingsPage() {
             id="display-name-input"
             type="text"
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => { setDirty(true); setDisplayName(e.target.value); }}
             placeholder="Not set"
             className="w-full rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-3 py-2 text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:ring-2 focus:ring-accent"
           />
@@ -405,6 +433,7 @@ export default function SettingsPage() {
             type="text"
             value={timezone}
             onChange={(e) => {
+              setDirty(true);
               setTimezone(e.target.value);
               setTimezoneManual(true);
             }}
@@ -432,7 +461,7 @@ export default function SettingsPage() {
           <select
             id="chronotype-select"
             value={chronotype}
-            onChange={(e) => setChronotype(e.target.value as 'EARLY_BIRD' | 'NIGHT_OWL' | 'NEUTRAL' | '')}
+            onChange={(e) => { setDirty(true); setChronotype(e.target.value as 'EARLY_BIRD' | 'NIGHT_OWL' | 'NEUTRAL' | ''); }}
             className="w-full rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-3 py-2 text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:ring-2 focus:ring-accent"
           >
             <option value="">Not set</option>
@@ -450,7 +479,7 @@ export default function SettingsPage() {
               <input
                 type="time"
                 value={workHoursStart}
-                onChange={(e) => setWorkHoursStart(e.target.value)}
+                onChange={(e) => { setDirty(true); setWorkHoursStart(e.target.value); }}
                 className="ml-2 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
               />
             </label>
@@ -459,7 +488,7 @@ export default function SettingsPage() {
               <input
                 type="time"
                 value={workHoursEnd}
-                onChange={(e) => setWorkHoursEnd(e.target.value)}
+                onChange={(e) => { setDirty(true); setWorkHoursEnd(e.target.value); }}
                 className="ml-2 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
               />
             </label>
@@ -485,7 +514,7 @@ export default function SettingsPage() {
                 min={5}
                 max={120}
                 value={pomodoroWorkMinutes}
-                onChange={(e) => setPomodoroWorkMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setPomodoroWorkMinutes(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="25"
                 aria-label="Pomodoro work minutes"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -499,7 +528,7 @@ export default function SettingsPage() {
                 min={1}
                 max={60}
                 value={pomodoroShortBreakMinutes}
-                onChange={(e) => setPomodoroShortBreakMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setPomodoroShortBreakMinutes(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="5"
                 aria-label="Pomodoro short break minutes"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -513,7 +542,7 @@ export default function SettingsPage() {
                 min={1}
                 max={180}
                 value={pomodoroLongBreakMinutes}
-                onChange={(e) => setPomodoroLongBreakMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setPomodoroLongBreakMinutes(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="15"
                 aria-label="Pomodoro long break minutes"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -527,7 +556,7 @@ export default function SettingsPage() {
                 min={2}
                 max={12}
                 value={pomodoroCyclesBeforeLongBreak}
-                onChange={(e) => setPomodoroCyclesBeforeLongBreak(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setPomodoroCyclesBeforeLongBreak(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="4"
                 aria-label="Long break every N cycles"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -555,7 +584,7 @@ export default function SettingsPage() {
                 min={0}
                 max={23}
                 value={reminderMorningRoutineHour}
-                onChange={(e) => setReminderMorningRoutineHour(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setReminderMorningRoutineHour(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="8"
                 aria-label="Morning routine reminder hour"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -569,7 +598,7 @@ export default function SettingsPage() {
                 min={0}
                 max={23}
                 value={reminderEveningRoutineHour}
-                onChange={(e) => setReminderEveningRoutineHour(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setReminderEveningRoutineHour(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="20"
                 aria-label="Evening routine reminder hour"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -583,7 +612,7 @@ export default function SettingsPage() {
                 min={0}
                 max={23}
                 value={reminderReflectionHour}
-                onChange={(e) => setReminderReflectionHour(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setReminderReflectionHour(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="21"
                 aria-label="Reflection reminder hour"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -603,7 +632,7 @@ export default function SettingsPage() {
                 min={1}
                 max={180}
                 value={reminderHabitMinOverdueMinutes}
-                onChange={(e) => setReminderHabitMinOverdueMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setReminderHabitMinOverdueMinutes(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="15"
                 aria-label="Habit reminder minimum overdue minutes"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -617,7 +646,7 @@ export default function SettingsPage() {
                 min={5}
                 max={480}
                 value={reminderHabitMaxOverdueMinutes}
-                onChange={(e) => setReminderHabitMaxOverdueMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setDirty(true); setReminderHabitMaxOverdueMinutes(e.target.value.replace(/[^0-9]/g, '')); }}
                 placeholder="120"
                 aria-label="Habit reminder maximum overdue minutes"
                 className="ml-2 w-16 rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
@@ -646,7 +675,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={reflectionWentWellLabel}
-                onChange={(e) => setReflectionWentWellLabel(e.target.value)}
+                onChange={(e) => { setDirty(true); setReflectionWentWellLabel(e.target.value); }}
                 maxLength={150}
                 placeholder="What went well today?"
                 aria-label="Went well question label"
@@ -658,7 +687,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={reflectionChallengingLabel}
-                onChange={(e) => setReflectionChallengingLabel(e.target.value)}
+                onChange={(e) => { setDirty(true); setReflectionChallengingLabel(e.target.value); }}
                 maxLength={150}
                 placeholder="What was challenging?"
                 aria-label="Challenging question label"
@@ -670,7 +699,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={reflectionCarryForwardLabel}
-                onChange={(e) => setReflectionCarryForwardLabel(e.target.value)}
+                onChange={(e) => { setDirty(true); setReflectionCarryForwardLabel(e.target.value); }}
                 maxLength={150}
                 placeholder="What do you want to carry into tomorrow?"
                 aria-label="Carry forward question label"
