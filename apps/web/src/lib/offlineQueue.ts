@@ -26,6 +26,19 @@ export interface QueuedMutation {
   kind: QueuedMutationKind;
   variables: Record<string, unknown>;
   createdAt: string;
+  // Fix (frontend audit, 2026-08-25): the `offline-<uuid>` placeholder id
+  // applyOptimisticCreateTask() writes into the cache (so the new task has
+  // a stable React key until the real record replaces it) was never
+  // threaded through to here. A completeTask queued for that same
+  // still-offline task carries that placeholder as its own `variables.id`
+  // — with nothing recording which createTask item it came from, flushQueue
+  // had no way to rewrite it once the real server id existed, so the
+  // completion silently failed against an id the server had never heard of
+  // (recorded only as a background sync error, never surfaced to the
+  // person who thought they'd completed the task). Set only on createTask
+  // items; flushQueue below reads it back to build the placeholder→real-id
+  // rewrite map.
+  optimisticId?: string;
 }
 
 function newId(): string {
@@ -59,8 +72,12 @@ export function isOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine;
 }
 
-export function enqueue(kind: QueuedMutationKind, variables: Record<string, unknown>): QueuedMutation {
-  const item: QueuedMutation = { id: newId(), kind, variables, createdAt: new Date().toISOString() };
+export function enqueue(
+  kind: QueuedMutationKind,
+  variables: Record<string, unknown>,
+  optimisticId?: string,
+): QueuedMutation {
+  const item: QueuedMutation = { id: newId(), kind, variables, createdAt: new Date().toISOString(), optimisticId };
   const queue = readQueue();
   queue.push(item);
   writeQueue(queue);
@@ -109,17 +126,24 @@ export function clearSyncErrors() {
 // React has a stable key until the queue flushes and a real refetch
 // replaces it with the server's actual record.
 
+// Fix (frontend audit, 2026-08-25): now returns the `offline-<uuid>`
+// placeholder id it writes into the cache, so a caller that goes on to
+// enqueue a createTask item can pass it along as that item's
+// `optimisticId` — see the QueuedMutation.optimisticId comment above for
+// why this is what lets flushQueue reconcile a same-session completeTask
+// against the eventual real server id instead of silently failing.
 export function applyOptimisticCreateTask(input: {
   title: string;
   estimatedDurationMinutes?: number;
   goalId?: string;
-}) {
+}): string | undefined {
+  const optimisticId = `offline-${newId()}`;
   try {
     const data = apolloClient.cache.readQuery<any>({ query: TODAY_PLAN_QUERY });
-    if (!data?.todayPlan) return;
+    if (!data?.todayPlan) return undefined;
     const optimisticTask = {
       __typename: 'Task',
-      id: `offline-${newId()}`,
+      id: optimisticId,
       title: input.title,
       status: 'PENDING',
       priority: 3,
@@ -152,10 +176,12 @@ export function applyOptimisticCreateTask(input: {
         },
       },
     });
+    return optimisticId;
   } catch {
     // Best-effort — if nothing's cached yet to patch (e.g. the very first
     // load happened offline), there's nothing to optimistically show; the
     // real data appears once the queue flushes and refetches for real.
+    return undefined;
   }
 }
 
@@ -237,11 +263,30 @@ export async function flushQueue(): Promise<void> {
     const queue = readQueue();
     let touchedTasks = false;
     let touchedJournal = false;
+    // Fix (frontend audit, 2026-08-25): maps each createTask item's
+    // `offline-<uuid>` optimisticId to the real id the server assigns once
+    // that mutation actually runs. A completeTask item queued while still
+    // offline (created and completed in the same offline session) carries
+    // that placeholder as its own `variables.id` — rewritten below, right
+    // before replay, once this item's createTask has resolved and the
+    // mapping exists. See QueuedMutation.optimisticId for the full story.
+    const resolvedTaskIds = new Map<string, string>();
 
     for (const item of queue) {
       try {
+        if (
+          item.kind === 'completeTask' &&
+          typeof item.variables.id === 'string' &&
+          resolvedTaskIds.has(item.variables.id)
+        ) {
+          item.variables = { ...item.variables, id: resolvedTaskIds.get(item.variables.id) };
+        }
         if (item.kind === 'createTask') {
-          await apolloClient.mutate({ mutation: CREATE_TASK, variables: item.variables });
+          const result = await apolloClient.mutate({ mutation: CREATE_TASK, variables: item.variables });
+          const realId = result.data?.createTask?.task?.id;
+          if (item.optimisticId && realId) {
+            resolvedTaskIds.set(item.optimisticId, realId);
+          }
           touchedTasks = true;
         } else if (item.kind === 'completeTask') {
           await apolloClient.mutate({ mutation: COMPLETE_TASK, variables: item.variables });
