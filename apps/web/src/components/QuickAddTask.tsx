@@ -50,8 +50,13 @@ export function QuickAddTask() {
     // request) so the person gets the instant optimistic row immediately,
     // not a spinner that eventually times out.
     if (!isOnline()) {
-      applyOptimisticCreateTask(variables);
-      enqueue('createTask', variables);
+      // Fix (frontend audit, 2026-08-25): the optimistic placeholder id is
+      // now threaded through to enqueue() as this item's optimisticId — see
+      // offlineQueue.ts's QueuedMutation.optimisticId comment for why,
+      // without it, completing this same task before reconnecting silently
+      // lost the completion.
+      const optimisticId = applyOptimisticCreateTask(variables);
+      enqueue('createTask', variables, optimisticId);
     } else {
       try {
         const result = await createTask({ variables });
@@ -71,8 +76,8 @@ export function QuickAddTask() {
         // A flaky connection that looked online a moment ago — same
         // fallback path as the explicit offline check above, so a
         // half-dropped wifi signal doesn't just lose the task outright.
-        applyOptimisticCreateTask(variables);
-        enqueue('createTask', variables);
+        const optimisticId = applyOptimisticCreateTask(variables);
+        enqueue('createTask', variables, optimisticId);
       }
     }
     setTitle('');
