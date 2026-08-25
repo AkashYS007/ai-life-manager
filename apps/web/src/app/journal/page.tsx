@@ -57,6 +57,7 @@ function relativeLabel(iso: string): string {
 
 function JournalComposer() {
   const [content, setContent] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [createEntry, { loading }] = useMutation(CREATE_JOURNAL_ENTRY, {
     refetchQueries: [{ query: JOURNAL_ENTRIES_QUERY }],
   });
@@ -65,6 +66,7 @@ function JournalComposer() {
     e.preventDefault();
     const trimmed = content.trim();
     if (!trimmed) return;
+    setSubmitError(null);
     const variables = { input: { content: trimmed } };
 
     // PWA + offline support increment: "journaling" is the third of the
@@ -75,7 +77,19 @@ function JournalComposer() {
       enqueue('createJournalEntry', variables);
     } else {
       try {
-        await createEntry({ variables });
+        const result = await createEntry({ variables });
+        // Fix (frontend audit, 2026-08-25): a server-side validation
+        // rejection comes back as this payload's own `errors[]`, not a
+        // thrown exception — previously never checked, so a rejected entry
+        // silently cleared the composer as if it had saved. A genuine
+        // rejection like this would just fail again on retry, so (unlike
+        // the thrown-exception branch below) this does NOT fall back to
+        // the offline queue.
+        const payloadErrors = result.data?.createJournalEntry?.errors;
+        if (payloadErrors?.length) {
+          setSubmitError(payloadErrors[0].message ?? "Couldn't save that entry. Try again.");
+          return;
+        }
       } catch {
         applyOptimisticJournalEntry(trimmed);
         enqueue('createJournalEntry', variables);
@@ -114,6 +128,11 @@ function JournalComposer() {
       >
         Save entry
       </button>
+      {submitError && (
+        <p className="text-xs text-danger dark:text-danger-dark" role="alert">
+          {submitError}
+        </p>
+      )}
     </form>
   );
 }
@@ -132,6 +151,7 @@ function JournalEntryRow({
   const [editing, setEditing] = useState(false);
   const sentiment = sentimentLabel(sentimentScore);
   const [draft, setDraft] = useState(content);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [updateEntry, { loading: saving }] = useMutation(UPDATE_JOURNAL_ENTRY, {
     refetchQueries: [{ query: JOURNAL_ENTRIES_QUERY }],
   });
@@ -140,11 +160,29 @@ function JournalEntryRow({
     refetchQueries: [{ query: JOURNAL_ENTRIES_QUERY }],
   });
 
+  // Fix (frontend audit, 2026-08-25): previously had no error handling at
+  // all — a thrown exception OR a payload-level rejection both left
+  // `setEditing(false)` unreached only for the throw case; for a payload
+  // rejection this used to still call setEditing(false), silently
+  // collapsing the row back to its stale pre-edit content with the actual
+  // edit discarded and no indication anything went wrong. Now checks both,
+  // and keeps the row open in edit mode (with the draft preserved) on
+  // either kind of failure.
   async function handleSave() {
     const trimmed = draft.trim();
     if (!trimmed) return;
-    await updateEntry({ variables: { id, input: { content: trimmed } } });
-    setEditing(false);
+    setSaveError(null);
+    try {
+      const result = await updateEntry({ variables: { id, input: { content: trimmed } } });
+      const payloadErrors = result.data?.updateJournalEntry?.errors;
+      if (payloadErrors?.length) {
+        setSaveError(payloadErrors[0].message ?? "Couldn't save your edit. Try again.");
+        return;
+      }
+      setEditing(false);
+    } catch {
+      setSaveError("Couldn't save your edit. Try again.");
+    }
   }
 
   return (
@@ -185,6 +223,11 @@ function JournalEntryRow({
               Cancel
             </button>
           </div>
+          {saveError && (
+            <p className="text-xs text-danger dark:text-danger-dark" role="alert">
+              {saveError}
+            </p>
+          )}
         </div>
       ) : (
         <>
