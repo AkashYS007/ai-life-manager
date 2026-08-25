@@ -40,6 +40,7 @@ export function TaskRow({
   // task.
   const [confirming, setConfirming] = useState(false);
   const [actualMinutes, setActualMinutes] = useState('');
+  const [completeError, setCompleteError] = useState<string | null>(null);
   // Focus sessions feed task duration back increment: tracks whether the
   // current `actualMinutes` value is the real number pulled from a
   // completed focus session, purely so the hint text below the input knows
@@ -75,6 +76,7 @@ export function TaskRow({
   async function submitCompletion(withActual: boolean) {
     const actualDurationMinutes = withActual && actualMinutes.trim() ? parseInt(actualMinutes, 10) : undefined;
     const variables = { id, actualDurationMinutes };
+    setCompleteError(null);
 
     // PWA + offline support increment: "completing a task" is the second
     // of the PRD's three named offline-capable actions. Same
@@ -85,7 +87,17 @@ export function TaskRow({
       return;
     }
     try {
-      await completeTask({ variables });
+      const result = await completeTask({ variables });
+      // Fix (frontend audit, 2026-08-25): a server-side rejection comes
+      // back as this payload's own `errors[]`, not a thrown exception —
+      // previously never checked, so a rejected completion left this row
+      // stuck on the "how long did this take?" prompt with no error shown
+      // and, until the Cancel button below, no way back out of it either.
+      const payloadErrors = result.data?.completeTask?.errors;
+      if (payloadErrors?.length) {
+        setCompleteError(payloadErrors[0].message ?? "Couldn't complete that task. Try again.");
+        return;
+      }
     } catch {
       applyOptimisticCompleteTask(id);
       enqueue('completeTask', variables);
@@ -130,6 +142,16 @@ export function TaskRow({
           >
             Skip
           </button>
+          <button
+            disabled={loading}
+            onClick={() => {
+              setConfirming(false);
+              setCompleteError(null);
+            }}
+            className="text-xs text-text-secondary hover:text-text-primary dark:text-text-secondary-dark"
+          >
+            Cancel
+          </button>
         </div>
         {/* Focus sessions feed task duration back increment: makes clear
             this number is a real, pulled-in value the person can still
@@ -139,6 +161,11 @@ export function TaskRow({
         {fromFocusSession && (
           <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
             From your focus sessions on this task — feel free to change it.
+          </p>
+        )}
+        {completeError && (
+          <p className="text-xs text-danger dark:text-danger-dark" role="alert">
+            {completeError}
           </p>
         )}
       </div>
