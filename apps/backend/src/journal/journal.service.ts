@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnthropicClient } from '../planner/anthropic-client';
 import { MemoryService } from '../memory/memory.service';
+import { AiUsageService } from '../ai-usage/ai-usage.service';
 import { JournalEntry } from './models/journal-entry.model';
 import { CreateJournalEntryInput } from './dto/create-journal-entry.input';
 import { UpdateJournalEntryInput } from './dto/update-journal-entry.input';
@@ -22,6 +23,8 @@ export class JournalService {
     // Journal sentiment analysis increment.
     private readonly anthropic: AnthropicClient,
     private readonly memoryService: MemoryService,
+    // AI cost telemetry increment.
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   private async requireOwnedEntry(userId: string, id: string) {
@@ -105,8 +108,15 @@ export class JournalService {
   private async scoreSentimentInBackground(userId: string, entryId: string, content: string): Promise<void> {
     let sentimentScore: number | null = null;
     try {
-      const { score } = await this.anthropic.analyzeSentiment(content);
+      const { score, modelUsed, usage } = await this.anthropic.analyzeSentiment(content);
       sentimentScore = score;
+      void this.aiUsage.record({
+        userId,
+        feature: 'sentiment',
+        model: modelUsed,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+      });
       await this.prisma.journalEntry.update({
         where: { id: entryId },
         data: { sentimentScore: score },
