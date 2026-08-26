@@ -8,6 +8,7 @@ import { CalendarModule } from '../calendar/calendar.module';
 import { SignalsModule } from '../signals/signals.module';
 import { PlannerModule } from '../planner/planner.module';
 import { MemoryModule } from '../memory/memory.module';
+import { AiUsageModule } from '../ai-usage/ai-usage.module';
 
 // Imports PlannerModule to reuse its exported AnthropicClient singleton
 // (the shared, stateless, low-level Anthropic API wrapper) rather than
@@ -32,7 +33,7 @@ import { MemoryModule } from '../memory/memory.module';
 // out-of-scope-for-now as the equivalent caveat already written down for
 // the scheduler.
 @Module({
-  imports: [UsersModule, TasksModule, CalendarModule, SignalsModule, PlannerModule, MemoryModule],
+  imports: [UsersModule, TasksModule, CalendarModule, SignalsModule, PlannerModule, MemoryModule, AiUsageModule],
   providers: [ChatService, ChatResolver, { provide: 'PUB_SUB', useValue: new PubSub() }],
   exports: [ChatService],
 })
