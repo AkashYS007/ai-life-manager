@@ -6,12 +6,22 @@ import { SignalsModule } from '../signals/signals.module';
 import { MemoryModule } from '../memory/memory.module';
 import { HabitsModule } from '../habits/habits.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AiUsageModule } from '../ai-usage/ai-usage.module';
 import { AnthropicClient } from './anthropic-client';
 import { PlannerService } from './planner.service';
 import { PlannerResolver } from './planner.resolver';
 
 @Module({
-  imports: [UsersModule, TasksModule, CalendarModule, SignalsModule, MemoryModule, HabitsModule, NotificationsModule],
+  imports: [
+    UsersModule,
+    TasksModule,
+    CalendarModule,
+    SignalsModule,
+    MemoryModule,
+    HabitsModule,
+    NotificationsModule,
+    AiUsageModule,
+  ],
   providers: [AnthropicClient, PlannerService, PlannerResolver],
   // AnthropicClient is exported (not just PlannerService) so ChatModule can
   // import this module and share the exact same singleton instance/token,
