@@ -86,13 +86,26 @@ function NotificationRowView({ notification }: { notification: NotificationRow }
 const PHONE_LOOKS_VALID = /^\+[1-9]\d{1,14}$/;
 
 function PreferencesForm() {
-  const { data, loading } = useQuery(NOTIFICATION_PREFERENCES_QUERY);
+  // Fix (frontend consistency pass, 2026-08-25): same gap as SETTINGS_QUERY
+  // on settings/page.tsx (see that file's own comment for the full
+  // reasoning) — `error` was never destructured or checked here either. A
+  // genuine query failure fell straight through to the same render branch
+  // as a real successful load, showing every toggle at its blank `useState`
+  // default with no indication anything had failed; hitting Save from there
+  // would submit those defaults as real preferences, silently overwriting
+  // whatever quiet-hours/channel settings actually existed.
+  const { data, loading, error: queryError, refetch: refetchPreferences } = useQuery(NOTIFICATION_PREFERENCES_QUERY);
   const [quietHoursStart, setQuietHoursStart] = useState('');
   const [quietHoursEnd, setQuietHoursEnd] = useState('');
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
+  // Notification controls increment (2026-08-25) — defaults to `true`,
+  // matching the field's own DB default (see schema.prisma), since voice
+  // notifications were unconditionally on for everyone before this control
+  // existed at all.
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [initialized, setInitialized] = useState(false);
   // Fix (frontend audit, 2026-08-25): matches the same fix on
   // settings/page.tsx (see its own comment for the full reasoning) — this
@@ -114,6 +127,7 @@ function PreferencesForm() {
     setEmailEnabled(data.me.emailNotificationsEnabled);
     setSmsEnabled(data.me.smsNotificationsEnabled);
     setPhoneNumber(data.me.phoneNumber ?? '');
+    setVoiceEnabled(data.me.voiceNotificationsEnabled);
     setInitialized(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.me, dirty]);
@@ -140,6 +154,7 @@ function PreferencesForm() {
             emailNotificationsEnabled: emailEnabled,
             smsNotificationsEnabled: smsEnabled,
             phoneNumber: trimmedPhone || null,
+            voiceNotificationsEnabled: voiceEnabled,
           },
         },
       });
@@ -164,6 +179,14 @@ function PreferencesForm() {
 
   if (loading && !initialized) {
     return <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>;
+  }
+
+  // Only ever shown before this form has real data to fall back on — once
+  // `initialized` is true, a later refetch failure keeps showing the
+  // last-known-good form instead of replacing it with an error, same
+  // precedent as settings/page.tsx's own matching fix.
+  if (queryError && !initialized) {
+    return <QueryErrorNotice error={queryError} what="your notification preferences" onRetry={() => refetchPreferences()} />;
   }
 
   return (
@@ -206,6 +229,17 @@ function PreferencesForm() {
         <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
           <input type="checkbox" checked={smsEnabled} onChange={(e) => { setDirty(true); setSmsEnabled(e.target.checked); }} />
           SMS
+        </label>
+        {/* Notification controls increment (2026-08-25): voice notifications
+            (VoiceNotifications.tsx on web/PWA, and the native Android
+            equivalent — see apps/mobile/README.md) used to be
+            unconditionally on with no way to turn them off. Kept in this
+            same checkbox group rather than a separate section — it's a
+            delivery-style preference, same as the three above, not a
+            distinct settings category. */}
+        <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
+          <input type="checkbox" checked={voiceEnabled} onChange={(e) => { setDirty(true); setVoiceEnabled(e.target.checked); }} />
+          Read notifications aloud (voice)
         </label>
       </div>
 
