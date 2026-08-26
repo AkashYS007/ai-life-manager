@@ -49,4 +49,10 @@ export class UpdateNotificationPreferencesInput {
   @IsOptional()
   @Matches(E164, { message: 'phoneNumber must be in E.164 format, e.g. +15551234567' })
   phoneNumber?: string;
+
+  // Notification controls increment (2026-08-25).
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsBoolean()
+  voiceNotificationsEnabled?: boolean;
 }
