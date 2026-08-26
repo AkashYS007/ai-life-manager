@@ -67,6 +67,10 @@ export class User {
   @Field({ nullable: true })
   phoneNumber?: string;
 
+  // Notification controls increment (2026-08-25).
+  @Field()
+  voiceNotificationsEnabled!: boolean;
+
   // Diagnostic onboarding increment — see schema.prisma's comment on these
   // same columns for why they live directly on User (mirrors quietHoursStart/
   // End's own precedent) rather than a dedicated onboarding-answers table.
