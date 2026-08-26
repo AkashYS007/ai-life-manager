@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { apolloClient } from '../lib/apollo-client';
+import { VOICE_NOTIFICATIONS_PREF_QUERY } from '../lib/queries';
 
 // Voice notifications increment (explicit user request, 2026-08-19): reads
 // each push notification aloud via the Web Speech API the moment it
@@ -22,6 +24,24 @@ import { useEffect } from 'react';
 // open client (see sw.js) rather than duplicating any delivery logic here —
 // one payload, read once by the OS notification banner and once aloud,
 // always in sync because both come from the exact same push event.
+//
+// Notification controls increment (2026-08-25): this used to speak
+// unconditionally, with no way to turn it off — a real gap the user's own
+// scorecard flagged. Gated on User.voiceNotificationsEnabled now, checked
+// fresh on every incoming push rather than once at mount: this component is
+// mounted once, globally, for the lifetime of the whole SPA session (see
+// layout.tsx's own comment on why it's outside <Providers>), so a value
+// cached only at mount would go stale the moment someone changed the
+// preference in Notifications without a full page reload. Uses the plain
+// `apolloClient` singleton directly, not the `useQuery` hook — this
+// component has no React Apollo *context* to run a hook against (same
+// reason it has no auth dependency at all), but the singleton is the same
+// client the rest of the app uses, so its normalized cache already reflects
+// a preference saved from Notifications (see UPDATE_NOTIFICATION_PREFERENCES's
+// own refetchQueries) without a second network round-trip most of the time.
+// Fails open (speaks anyway) on a query error — a transient failure here
+// should degrade to "the same always-on behavior this had before this
+// increment," not silently go mute.
 export function VoiceNotifications() {
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !('serviceWorker' in navigator)) {
@@ -38,9 +58,29 @@ export function VoiceNotifications() {
       window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
     }
 
+    async function shouldSpeak(): Promise<boolean> {
+      try {
+        const { data } = await apolloClient.query({
+          query: VOICE_NOTIFICATIONS_PREF_QUERY,
+          fetchPolicy: 'cache-first',
+        });
+        // `data?.me` is null/undefined for a signed-out visitor (this
+        // component is mounted even on public pages — see its own top
+        // comment) — nothing to gate on push-wise for someone who was never
+        // signed in to receive a real push in the first place, so this
+        // never actually blocks a real notification for a real user.
+        return data?.me?.voiceNotificationsEnabled ?? true;
+      } catch {
+        return true;
+      }
+    }
+
     function onMessage(event: MessageEvent) {
       if (event.data && event.data.type === 'ailm-push' && event.data.payload) {
-        speak(event.data.payload);
+        const payload = event.data.payload;
+        void shouldSpeak().then((allowed) => {
+          if (allowed) speak(payload);
+        });
       }
     }
 

@@ -6,6 +6,14 @@ import { usePathname } from 'next/navigation';
 // All seven are real routes now — Journal was the last plain-label
 // placeholder (an honest "not built yet," not a dead link), until this
 // increment.
+//
+// Navigation decluttering increment (frontend UX pass, 2026-08-25): this
+// seventh tab used to be labeled "More" but actually went straight to
+// Completed tasks — a real feature, but not a navigation hub, despite being
+// the one item in this list that looked and read like one. Repointed at the
+// new /menu hub (see that page) instead, which is what "More" always should
+// have meant; Completed tasks now has its own real entry inside that menu
+// rather than silently occupying the bottom nav's only catch-all slot.
 const linked = [
   { label: 'Today', href: '/today' },
   { label: 'Calendar', href: '/calendar' },
@@ -13,7 +21,7 @@ const linked = [
   { label: 'Journal', href: '/journal' },
   { label: 'Chat', href: '/chat' },
   { label: 'Memory', href: '/memory' },
-  { label: 'More', href: '/more' },
+  { label: 'Menu', href: '/menu' },
 ];
 const unbuilt: string[] = [];
 
