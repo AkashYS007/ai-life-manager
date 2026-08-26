@@ -14,11 +14,13 @@ type Tab = 'OPEN' | 'CANCELLED';
 // in this app — `updateTask`/`cancelTask`/`createTag` have all been real,
 // working mutations since the very first Tasks increment, but there was
 // never a dedicated screen to actually use them beyond the narrow "Edit
-// task" control inside a plan review row (see AiPlanCard). Reachable via a
-// **Tasks →** link on Today, same not-a-nav-tab pattern as
-// Goals/Focus/Reflection/Routines/Notifications/Insights — no eighth
-// bottom-nav item. Completed tasks intentionally stay on the existing
-// `/more` page rather than being duplicated here as a third tab.
+// task" control inside a plan review row (see AiPlanCard). Reachable via the
+// /menu hub (Navigation decluttering increment, 2026-08-25 — see that
+// page's own comment; originally a **Tasks →** link directly on Today,
+// before that whole link row was folded into one menu). Completed tasks
+// intentionally stay on the existing `/more` page rather than being
+// duplicated here as a third tab — also reachable from /menu now, in
+// addition to the direct link below.
 //
 // Tasks pagination increment: each tab now runs its own independently
 // cursor-paginated query (OPEN_TASKS_QUERY / CANCELLED_TASKS_QUERY — see
