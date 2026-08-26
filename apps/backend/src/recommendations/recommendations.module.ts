@@ -10,6 +10,7 @@ import { MemoryModule } from '../memory/memory.module';
 import { PlannerModule } from '../planner/planner.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { FocusModule } from '../focus/focus.module';
+import { AiUsageModule } from '../ai-usage/ai-usage.module';
 
 // Same shape as PlannerModule's own imports list (TasksModule, CalendarModule,
 // SignalsModule, HabitsModule, MemoryModule) since this feature needs the
@@ -34,6 +35,7 @@ import { FocusModule } from '../focus/focus.module';
     PlannerModule,
     NotificationsModule,
     FocusModule,
+    AiUsageModule,
   ],
   providers: [RecommendationsService, RecommendationsResolver],
   exports: [RecommendationsService],
