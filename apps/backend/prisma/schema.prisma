@@ -91,6 +91,16 @@ model User {
   // set" gap the old Real notification delivery increment's own note used
   // to flag explicitly for this exact field.
   phoneNumber                String?  @map("phone_number")
+  // Notification controls increment (frontend UX pass, 2026-08-25): the
+  // browser voice-reading feature (VoiceNotifications.tsx, and now the
+  // native Android equivalent — see apps/mobile/README.md) has been
+  // unconditionally on since it shipped, with no field anywhere to turn it
+  // off — a real gap the user's own scorecard flagged as "notification
+  // controls: expand for voice." Defaults to `true` specifically so nobody
+  // already living with voice notifications sees a silent behavior change
+  // the moment this migration runs; it only takes effect once someone
+  // actually visits Settings and turns it off.
+  voiceNotificationsEnabled  Boolean  @default(true) @map("voice_notifications_enabled")
   // Diagnostic onboarding increment — the PRD (§7.1) and UI/UX Design
   // Document (§5, §10) both require onboarding to establish "baseline
   // chronotype, work hours, priorities," but neither the Database nor API
@@ -193,6 +203,7 @@ model User {
   aiRecommendationRuns AiRecommendationRun[]
   aiConversations      AiConversation[]
   aiMemoryFacts        AiMemoryFact[]
+  aiUsageEvents        AiUsageEvent[]
   journalEntries       JournalEntry[]
   dailyReflections     DailyReflection[]
   routines             Routine[]
@@ -567,6 +578,49 @@ model AiPlanRun {
 
   @@index([userId, scope, generatedAt])
   @@map("ai_plan_runs")
+}
+
+// ---------------------------------------------------------------------------
+// AI cost telemetry increment (self-audit follow-up, 2026-08-25 — user's own
+// AI/planner scorecard flagged "AI cost telemetry: Needed"). Every real call
+// to Anthropic's API in this app (AnthropicClient.analyzeSentiment,
+// .proposeSchedule, .sendMessage, .streamMessage) previously discarded the
+// response's own `usage` block entirely — token counts were never recorded
+// anywhere, so there was no way to answer "how much is this actually
+// costing" without pulling raw logs from the Anthropic console by hand.
+//
+// One row per real API call, not per feature-per-day like AiRecommendationRun
+// above — a cost ledger needs to preserve every individual call to stay an
+// honest audit trail (an aggregate-and-overwrite shape would silently lose
+// history the moment two calls landed the same day). `inputTokens`/
+// `outputTokens` are recorded exactly as Anthropic's response reports them —
+// never estimated — since that's the one number here that's simply true,
+// not a judgment call. `estimatedCostUsd` is deliberately nullable and
+// computed from a small, explicitly-versioned pricing table
+// (`common/ai-pricing.ts`) kept separate from this schema: Anthropic's
+// per-model pricing is a fact about the world today, not something to
+// hardcode as if it can never change, and a model this app is pointed at via
+// `ANTHROPIC_MODEL` that isn't in that table yet must still record its real
+// token counts, just with a null (not a fabricated) cost.
+//
+// Recording is deliberately best-effort — see AiUsageService.record's own
+// comment — a logging failure must never take down the real AI response a
+// person is waiting on, the same "never let telemetry break the feature it's
+// measuring" discipline this app already applies to delivery retries.
+model AiUsageEvent {
+  id               String   @id @default(uuid())
+  userId           String?  @map("user_id")
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  feature          String // 'chat' | 'chat_streaming' | 'planner_replan' | 'planner_estimate_duration' | 'sentiment' | 'recommendations' | 'reflection_prompt' — free-form on purpose, same "narrow now, grows without a schema change" reasoning as Notification.type
+  model            String   @map("model") // the real model string Anthropic's response reported (AnthropicClient's own `modelUsed`), not just whatever ANTHROPIC_MODEL was configured to at call time
+  inputTokens      Int      @map("input_tokens")
+  outputTokens     Int      @map("output_tokens")
+  estimatedCostUsd Decimal? @map("estimated_cost_usd") @db.Decimal(10, 6)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([feature, createdAt])
+  @@map("ai_usage_events")
 }
 
 // ---------------------------------------------------------------------------
