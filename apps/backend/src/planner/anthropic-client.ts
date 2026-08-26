@@ -38,6 +38,21 @@ export interface AnthropicToolUse {
   input: unknown;
 }
 
+// AI cost telemetry increment (2026-08-25). Every method below now returns
+// its call's real token counts alongside its actual result, so every caller
+// can hand them straight to AiUsageService.record without re-parsing
+// anything — the alternative (each caller re-reading a raw response body
+// itself) would mean either exposing the raw fetch response outside this
+// client (defeating the point of wrapping the API at all) or duplicating
+// the same `body.usage` extraction four times. Non-streaming calls read
+// this straight off Anthropic's response body (`body.usage`); streamMessage
+// accumulates it from the `message_start`/`message_delta` SSE events — see
+// that method's own comment for why it can't just read one field.
+export interface AnthropicUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 // The three real actions Chat can now take on the person's behalf — see
 // ChatService.executeTool for what each one actually does server-side once
 // the model asks for it, and that same method's own comment for why the
@@ -268,6 +283,18 @@ const SENTIMENT_TOOL = {
   },
 };
 
+// Anthropic's non-streaming Messages API always returns a top-level `usage`
+// object; defensively defaulted to 0/0 rather than left `undefined` in the
+// (never actually observed, but not contractually guaranteed) case it's
+// ever missing — a usage-logging caller should get a real, addable number,
+// not something that turns every downstream sum into NaN.
+function extractUsage(body: { usage?: { input_tokens?: number; output_tokens?: number } }): AnthropicUsage {
+  return {
+    inputTokens: body.usage?.input_tokens ?? 0,
+    outputTokens: body.usage?.output_tokens ?? 0,
+  };
+}
+
 @Injectable()
 export class AnthropicClient {
   constructor(private readonly config: ConfigService) {}
@@ -285,7 +312,7 @@ export class AnthropicClient {
   // numeric, not that it's in range), same "the tool schema guarantees
   // shape, not that the value is sane" caveat SCHEDULE_TOOL's own comment
   // already documents for proposeSchedule's callers.
-  async analyzeSentiment(content: string): Promise<{ score: number; modelUsed: string }> {
+  async analyzeSentiment(content: string): Promise<{ score: number; modelUsed: string; usage: AnthropicUsage }> {
     const model = this.config.get<string>('ANTHROPIC_MODEL')!;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -320,10 +347,10 @@ export class AnthropicClient {
 
     const rawScore = Number((toolUse.input as { score: unknown }).score);
     const score = Number.isFinite(rawScore) ? Math.max(-1, Math.min(1, rawScore)) : 0;
-    return { score, modelUsed: body.model ?? model };
+    return { score, modelUsed: body.model ?? model, usage: extractUsage(body) };
   }
 
-  async proposeSchedule(prompt: string): Promise<{ proposal: ScheduleProposal; modelUsed: string }> {
+  async proposeSchedule(prompt: string): Promise<{ proposal: ScheduleProposal; modelUsed: string; usage: AnthropicUsage }> {
     const model = this.config.get<string>('ANTHROPIC_MODEL')!;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -351,7 +378,7 @@ export class AnthropicClient {
       throw new Error('Anthropic response did not include the expected tool_use block');
     }
 
-    return { proposal: toolUse.input as ScheduleProposal, modelUsed: body.model ?? model };
+    return { proposal: toolUse.input as ScheduleProposal, modelUsed: body.model ?? model, usage: extractUsage(body) };
   }
 
   // Plain multi-turn text completion — the legacy, non-streaming path
@@ -365,7 +392,7 @@ export class AnthropicClient {
   async sendMessage(
     messages: AnthropicMessage[],
     system: string,
-  ): Promise<{ content: string; modelUsed: string }> {
+  ): Promise<{ content: string; modelUsed: string; usage: AnthropicUsage }> {
     const model = this.config.get<string>('ANTHROPIC_MODEL')!;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -392,7 +419,7 @@ export class AnthropicClient {
       throw new Error('Anthropic response did not include the expected text block');
     }
 
-    return { content: textBlock.text as string, modelUsed: body.model ?? model };
+    return { content: textBlock.text as string, modelUsed: body.model ?? model, usage: extractUsage(body) };
   }
 
   // Real-time chat streaming increment, extended by Tool-calling actions in
@@ -423,7 +450,7 @@ export class AnthropicClient {
     system: string,
     onDelta: (text: string) => void,
     tools?: AnthropicTool[],
-  ): Promise<{ content: string; modelUsed: string; toolUses: AnthropicToolUse[] }> {
+  ): Promise<{ content: string; modelUsed: string; toolUses: AnthropicToolUse[]; usage: AnthropicUsage }> {
     const model = this.config.get<string>('ANTHROPIC_MODEL')!;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -451,6 +478,17 @@ export class AnthropicClient {
 
     let accumulated = '';
     let modelUsed = model;
+    // AI cost telemetry increment. Unlike a non-streaming response, usage
+    // here arrives split across two different event types: `message_start`
+    // carries the real `input_tokens` up front (the request side is known
+    // the instant Anthropic starts responding), while `output_tokens` only
+    // becomes final in `message_delta`, sent once generation actually
+    // finishes — genuinely can't be known any earlier, since it's a count
+    // of what the model is still in the middle of producing. Both default
+    // to 0 so a response that (for whatever reason) omits a usage field
+    // entirely still returns a real, addable number rather than undefined.
+    let inputTokens = 0;
+    let outputTokens = 0;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     // SSE frames are separated by a blank line; a frame that arrives split
@@ -481,6 +519,15 @@ export class AnthropicClient {
         const event = JSON.parse(dataLine.slice('data: '.length));
         if (event.type === 'message_start') {
           modelUsed = event.message?.model ?? modelUsed;
+          inputTokens = event.message?.usage?.input_tokens ?? inputTokens;
+          // Anthropic's own message_start.usage also carries a provisional
+          // output_tokens (typically 1-2, before any real generation has
+          // happened) — deliberately not read here; message_delta below
+          // always arrives with the real, final count before message_stop,
+          // so reading it there instead of overwriting a near-meaningless
+          // early value here is strictly more accurate for no extra cost.
+        } else if (event.type === 'message_delta') {
+          outputTokens = event.usage?.output_tokens ?? outputTokens;
         } else if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
           toolBlocks.set(event.index, { id: event.content_block.id, name: event.content_block.name, jsonBuffer: '' });
         } else if (event.type === 'content_block_delta') {
@@ -493,11 +540,11 @@ export class AnthropicClient {
             if (block) block.jsonBuffer += event.delta.partial_json ?? '';
           }
         }
-        // content_block_stop/message_delta/message_stop/ping carry nothing
-        // this method needs to react to mid-stream — a tool_use block's
-        // accumulated JSON is only ever parsed once, below, after the loop
-        // finishes (simpler and just as correct as parsing on that block's
-        // own content_block_stop, since nothing reads toolBlocks until then
+        // content_block_stop/message_stop/ping carry nothing this method
+        // needs to react to mid-stream — a tool_use block's accumulated
+        // JSON is only ever parsed once, below, after the loop finishes
+        // (simpler and just as correct as parsing on that block's own
+        // content_block_stop, since nothing reads toolBlocks until then
         // anyway).
       }
     }
@@ -511,6 +558,6 @@ export class AnthropicClient {
       input: JSON.parse(block.jsonBuffer || '{}'),
     }));
 
-    return { content: accumulated, modelUsed, toolUses };
+    return { content: accumulated, modelUsed, toolUses, usage: { inputTokens, outputTokens } };
   }
 }
