@@ -10,6 +10,7 @@ import { HabitsService } from '../habits/habits.service';
 import { MemoryService } from '../memory/memory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AnthropicClient } from '../planner/anthropic-client';
+import { AiUsageService } from '../ai-usage/ai-usage.service';
 import { FocusService } from '../focus/focus.service';
 import { FocusSessionKind } from '../focus/models/focus-session.model';
 import { AiRecommendationRun, RecommendationCategory } from './models/recommendation.model';
@@ -93,6 +94,8 @@ export class RecommendationsService {
     private readonly notificationsService: NotificationsService,
     private readonly anthropic: AnthropicClient,
     private readonly focusService: FocusService,
+    // AI cost telemetry increment.
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   async getToday(userId: string, timezone: string): Promise<AiRecommendationRun | null> {
@@ -172,7 +175,14 @@ ${habitsList}
 ${stateLines}
 ${memorySection}`;
 
-    const { content, modelUsed } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
+    const { content, modelUsed, usage } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
+    void this.aiUsage.record({
+      userId,
+      feature: 'recommendations',
+      model: modelUsed,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+    });
 
     const recommendations: StoredRecommendation[] = content
       .split('\n')
