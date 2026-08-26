@@ -11,6 +11,7 @@ import { MemoryService } from '../memory/memory.service';
 import { HabitsService } from '../habits/habits.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AnthropicClient } from './anthropic-client';
+import { AiUsageService } from '../ai-usage/ai-usage.service';
 import { AiPlanRun, PlanRunDecision, PlanScope } from './models/ai-plan-run.model';
 import { PlanChangeType } from './models/plan-change.model';
 import { PlanChangeEditInput } from './dto/plan-change-edit.input';
@@ -148,6 +149,8 @@ export class PlannerService {
     private readonly habitsService: HabitsService,
     private readonly notificationsService: NotificationsService,
     private readonly anthropic: AnthropicClient,
+    // AI cost telemetry increment.
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   isConfigured(): boolean {
@@ -244,7 +247,14 @@ export class PlannerService {
       workdayEndHour,
     });
 
-    const { proposal, modelUsed } = await this.anthropic.proposeSchedule(prompt);
+    const { proposal, modelUsed, usage } = await this.anthropic.proposeSchedule(prompt);
+    void this.aiUsage.record({
+      userId,
+      feature: 'planner_replan',
+      model: modelUsed,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+    });
 
     // Defensive bug fix: `proposal.changes` just below was already treated
     // as fully untrusted (every field re-validated before anything is kept
@@ -904,7 +914,14 @@ export class PlannerService {
         .filter(Boolean)
         .join('\n');
 
-      const { content } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
+      const { content, modelUsed, usage } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
+      void this.aiUsage.record({
+        userId,
+        feature: 'planner_estimate_duration',
+        model: modelUsed,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+      });
       const match = content.match(/\d+/);
       if (!match) return null;
 
