@@ -1675,6 +1675,24 @@ export const NOTIFICATION_PREFERENCES_QUERY = gql`
       emailNotificationsEnabled
       smsNotificationsEnabled
       phoneNumber
+      voiceNotificationsEnabled
+    }
+  }
+`;
+
+// Notification controls increment (2026-08-25). A small, standalone query
+// (not reused from NOTIFICATION_PREFERENCES_QUERY above) specifically so
+// VoiceNotifications.tsx can fetch just this one field imperatively via the
+// plain apolloClient singleton — it's mounted in layout.tsx outside
+// <Providers> (see that file's own comment on why: no auth/Apollo *context*
+// dependency, active on every page including signed-out ones), so it has no
+// React Apollo context to run a normal useQuery hook against. Same
+// underlying client, just called directly rather than through a hook.
+export const VOICE_NOTIFICATIONS_PREF_QUERY = gql`
+  query VoiceNotificationsPref {
+    me {
+      id
+      voiceNotificationsEnabled
     }
   }
 `;
@@ -1751,6 +1769,7 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
         emailNotificationsEnabled
         smsNotificationsEnabled
         phoneNumber
+        voiceNotificationsEnabled
       }
       errors {
         code
