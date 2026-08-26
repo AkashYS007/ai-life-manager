@@ -13,6 +13,7 @@ import {
   CREATE_BILLING_PORTAL_SESSION,
 } from '../../lib/queries';
 import { BottomNav } from '../../components/BottomNav';
+import { QueryErrorNotice } from '../../components/QueryErrorNotice';
 import { apolloClient, runClerkSignOutIfAvailable, openClerkUserProfile } from '../../lib/apollo-client';
 
 const isDevAuth = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev';
@@ -119,7 +120,23 @@ export default function SettingsPage() {
   // persists the cache at all), but always also fires a real request and
   // corrects itself the moment that returns, rather than trusting a
   // snapshot that might already be stale.
-  const { data, loading } = useQuery(SETTINGS_QUERY, { fetchPolicy: 'cache-and-network' });
+  // Fix (frontend consistency pass, 2026-08-25): `error` was never
+  // destructured here at all — a genuine SETTINGS_QUERY failure (network
+  // blip, server error) left `loading` false and `data` undefined forever,
+  // with nothing in this component ever checking for it. The render logic
+  // below used to key entirely off `loading`/`initialized`, so that failure
+  // fell straight through to the same branch as a real successful load: the
+  // full form rendered with every field at its blank `useState('')` default
+  // (the sync effect below bails out early on `!data?.me`, so nothing ever
+  // populated them), no error message, no retry — indistinguishable from a
+  // legitimately brand-new, empty account. Touching any field flips `dirty`
+  // and enables Save, which would then submit those blanks as real values,
+  // silently overwriting whatever settings actually existed the moment the
+  // network recovered — the exact "mutation silently loses real data"
+  // failure shape this session's headline frontend finding was about,
+  // just on the query side instead of a mutation. `refetch` is what
+  // QueryErrorNotice's own retry button below actually calls.
+  const { data, loading, error: queryError, refetch } = useQuery(SETTINGS_QUERY, { fetchPolicy: 'cache-and-network' });
   const [displayName, setDisplayName] = useState('');
   const [timezone, setTimezone] = useState('');
   const [timezoneManual, setTimezoneManual] = useState(false);
@@ -405,7 +422,18 @@ export default function SettingsPage() {
         <p className="px-5 pb-3 text-sm text-text-secondary dark:text-text-secondary-dark">Loading…</p>
       )}
 
-      {(!loading || initialized) && (
+      {/* Only ever shown before this page has real data to fall back on —
+          once `initialized` is true (a real successful load already
+          happened at some point), a later refetch failure keeps showing the
+          last-known-good form below instead of replacing it with an error,
+          same "don't throw away something that has value over a transient
+          failure" precedent ReflectionService.submit's own comment already
+          establishes on the backend. */}
+      {queryError && !initialized && (
+        <QueryErrorNotice error={queryError} what="your settings" onRetry={() => refetch()} />
+      )}
+
+      {(initialized || (!loading && !queryError)) && (
         <div className="mx-4 mb-4 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
           <h2 className="mb-1 text-sm font-medium text-text-primary dark:text-text-primary-dark">Name</h2>
           <label htmlFor="display-name-input" className="mb-1 block text-xs text-text-secondary dark:text-text-secondary-dark">
