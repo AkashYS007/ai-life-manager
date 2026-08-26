@@ -8,6 +8,7 @@ import { SignalsService } from '../signals/signals.service';
 import { MemoryService } from '../memory/memory.service';
 import { AnthropicClient, AnthropicContentBlock, AnthropicMessage, AnthropicToolUse, CHAT_TOOLS } from '../planner/anthropic-client';
 import { parseAiDateTime, DEFAULT_TASK_DURATION_MINUTES } from '../planner/planner.service';
+import { AiUsageService } from '../ai-usage/ai-usage.service';
 import { AiConversation } from './models/ai-conversation.model';
 import { ChatMessageRole } from './models/chat-message.model';
 
@@ -46,6 +47,8 @@ export class ChatService {
     private readonly signalsService: SignalsService,
     private readonly memoryService: MemoryService,
     private readonly anthropic: AnthropicClient,
+    // AI cost telemetry increment.
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   isConfigured(): boolean {
@@ -270,7 +273,14 @@ ${memorySection}`;
     conversationId?: string,
   ): Promise<AiConversation> {
     const { conversation, messages, system } = await this.prepareTurn(userId, timezone, content, conversationId);
-    const { content: replyContent } = await this.anthropic.sendMessage(messages, system);
+    const { content: replyContent, modelUsed, usage } = await this.anthropic.sendMessage(messages, system);
+    void this.aiUsage.record({
+      userId,
+      feature: 'chat',
+      model: modelUsed,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+    });
     await this.persistMessage(conversation.id, 'ASSISTANT', replyContent);
     return this.touchAndHydrate(conversation.id);
   }
@@ -500,12 +510,19 @@ ${memorySection}`;
     let naturalStop = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const { content: text, toolUses } = await this.anthropic.streamMessage(
+      const { content: text, toolUses, modelUsed, usage } = await this.anthropic.streamMessage(
         working,
         system,
         (delta) => onEvent('ASSISTANT', delta),
         CHAT_TOOLS,
       );
+      void this.aiUsage.record({
+        userId,
+        feature: 'chat_streaming',
+        model: modelUsed,
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+      });
 
       if (text.trim()) {
         await this.persistMessage(conversation.id, 'ASSISTANT', text);
