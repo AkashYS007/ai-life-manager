@@ -32,6 +32,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { BillingModule } from './billing/billing.module';
+import { AiUsageModule } from './ai-usage/ai-usage.module';
 import { HealthController } from './health/health.controller';
 import { GraphqlExceptionFilter } from './common/filters/graphql-exception.filter';
 import { AuthGuard } from './auth/auth.guard';
@@ -158,6 +159,7 @@ import { AuthGuard } from './auth/auth.guard';
     AnalyticsModule,
     TodayModule,
     BillingModule,
+    AiUsageModule,
   ],
   controllers: [HealthController],
   providers: [
