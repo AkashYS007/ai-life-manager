@@ -350,6 +350,7 @@ export class NotificationsService {
         emailNotificationsEnabled: input.emailNotificationsEnabled,
         smsNotificationsEnabled: input.smsNotificationsEnabled,
         phoneNumber: input.phoneNumber,
+        voiceNotificationsEnabled: input.voiceNotificationsEnabled,
       },
       include: { subscription: true },
     });
