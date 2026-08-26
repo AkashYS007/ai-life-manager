@@ -21,7 +21,6 @@ import { HabitRow } from '../../components/HabitRow';
 import { RoutineChecklist } from '../../components/RoutineChecklist';
 import { OfflineSyncBanner } from '../../components/OfflineSyncBanner';
 import { QueryErrorNotice } from '../../components/QueryErrorNotice';
-import Link from 'next/link';
 
 export default function TodayPage() {
   const { data, loading, error, refetch } = useQuery(TODAY_PLAN_QUERY);
@@ -63,58 +62,22 @@ export default function TodayPage() {
 
   return (
     <main id="main-content" className="mx-auto max-w-md rounded-sheet border border-border dark:border-border-dark bg-surface/40 dark:bg-surface-dark/40">
-      <TodayHeader greeting={plan.greeting} name={name} />
+      <TodayHeader
+        greeting={plan.greeting}
+        name={name}
+        unreadNotificationCount={unreadData?.unreadNotificationCount}
+      />
 
-      {/* Focus sessions increment: the only entry point to /focus that
-          doesn't come from a specific task's "Focus" link (see TaskRow) —
-          not in the bottom nav on purpose, since the UI/UX Design
-          Document's mobile navigation (§4) doesn't list Focus as a tab;
-          this keeps it reachable without adding an eighth nav item. */}
-      <div className="flex flex-wrap gap-x-3 gap-y-1.5 px-5 pb-1">
-        <Link href="/focus" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Start a focus session →
-        </Link>
-        {/* Daily reflection increment: same "not a bottom-nav tab" reasoning
-            as Focus — the UI/UX Design Document's mobile nav (§4) doesn't
-            list it either, so a small link here keeps it reachable without
-            an eighth nav item. */}
-        <Link href="/reflection" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Reflect on today →
-        </Link>
-        {/* Morning/evening routines increment: same reasoning again — no
-            eighth bottom-nav tab, reachable from Today instead. */}
-        <Link href="/routines" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Set up routines →
-        </Link>
-        {/* Smart notifications increment: same "not a bottom-nav tab"
-            reasoning as the three links above. */}
-        <Link href="/notifications" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Notifications{unreadData?.unreadNotificationCount ? ` (${unreadData.unreadNotificationCount})` : ''} →
-        </Link>
-        {/* Goals increment: same "not a bottom-nav tab" reasoning as the
-            four links above — no ninth tab, reachable from Today instead. */}
-        <Link href="/goals" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Goals →
-        </Link>
-        {/* Life analytics increment: same "not a bottom-nav tab" reasoning
-            as the five links above — no tenth tab, reachable from Today
-            instead. */}
-        <Link href="/analytics" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Insights →
-        </Link>
-        {/* Tasks list/edit screen increment: same "not a bottom-nav tab"
-            reasoning as the six links above — no eleventh tab, reachable
-            from Today instead. */}
-        <Link href="/tasks" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Tasks →
-        </Link>
-        {/* Visible settings screen increment: same "not a bottom-nav tab"
-            reasoning as the seven links above — no twelfth tab, reachable
-            from Today instead. */}
-        <Link href="/settings" className="text-xs text-text-secondary hover:text-ai-accent dark:text-text-secondary-dark">
-          Settings →
-        </Link>
-      </div>
+      {/* Navigation decluttering increment (frontend UX pass, 2026-08-25):
+          this used to be an eight-item wrapping row of small text links
+          (Focus, Reflection, Routines, Notifications, Goals, Insights,
+          Tasks, Settings) — the only way to reach any of them, stacked
+          directly on top of Today's own already-substantial real content.
+          Every one of those, Notifications included, is now reachable from
+          TodayHeader's menu icon (→ /menu) — Notifications additionally
+          keeps its own bell icon there too, since it's the one genuinely
+          time-sensitive one. See TodayHeader's and /menu's own comments for
+          the full reasoning. */}
 
       <OfflineSyncBanner />
 
