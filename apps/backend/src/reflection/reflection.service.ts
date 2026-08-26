@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnthropicClient } from '../planner/anthropic-client';
+import { AiUsageService } from '../ai-usage/ai-usage.service';
 import { DailyReflection } from './models/daily-reflection.model';
 import { SubmitDailyReflectionInput } from './dto/submit-daily-reflection.input';
 
@@ -44,6 +45,8 @@ export class ReflectionService {
     // but the same shape is used anyway for consistency across every
     // trigger source in this app.
     private readonly eventEmitter: EventEmitter2,
+    // AI cost telemetry increment.
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   async getToday(userId: string, timezone: string): Promise<DailyReflection | null> {
@@ -87,8 +90,15 @@ export class ReflectionService {
         const system =
           "You are summarizing someone's end-of-day reflection for a personal life-planning app. Write one warm, specific, encouraging sentence or two — not generic productivity-coach language — that reflects what they actually wrote. Do not invent details they didn't mention.";
         const prompt = `What went well today: ${input.wentWell}\nWhat was challenging: ${input.challenging}\nWhat they want to carry into tomorrow: ${input.carryForward}`;
-        const { content } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
+        const { content, modelUsed, usage } = await this.anthropic.sendMessage([{ role: 'user', content: prompt }], system);
         aiSummary = content;
+        void this.aiUsage.record({
+          userId,
+          feature: 'reflection_prompt',
+          model: modelUsed,
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+        });
       } catch (error) {
         // Best-effort, same reasoning as the swallowed per-task-schedule
         // errors in planner.service.ts's ACCEPT branch and the
