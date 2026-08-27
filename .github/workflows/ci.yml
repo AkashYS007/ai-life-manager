@@ -1,0 +1,90 @@
+name: CI
+
+# Deployment maturity pass (2026-08-27): the missing backend/web CI gate,
+# flagged since the architecture audit and re-confirmed at every later audit
+# (Update 49 finding #15's sibling gap, Update 61's roadmap item #18). Runs
+# on every push and pull request targeting `main` so a broken build/lint/test
+# is caught before it lands, not after Railway/Vercel already deployed it.
+#
+# Scope, deliberately: build + lint + unit test for both apps. The e2e suite
+# (test/app.e2e-spec.ts) needs a live Postgres and isn't wired in here yet —
+# see README's own "Still untested" section for that follow-up.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push on the same branch/PR cancels an in-flight run for it, so a
+# rapid sequence of commits (this repo's own established multi-file commit
+# pattern) doesn't queue up redundant runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # prisma generate validates that its schema's env("DATABASE_URL") resolves
+  # to *something* before it will run, even though generate itself never
+  # opens a real connection — this placeholder is never used to connect.
+  DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ci_placeholder'
+
+jobs:
+  backend:
+    name: Backend (build, lint, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+  web:
+    name: Web (build, lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install workspace dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        # No standalone unit-test runner is configured for apps/web — this
+        # project's established pattern is tsc (enforced implicitly by
+        # `next build`) plus the Playwright e2e suite, which needs a live
+        # backend this CI job doesn't stand up. See README's own
+        # "Still untested" section.
+        run: npm run build
