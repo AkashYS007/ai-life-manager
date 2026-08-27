@@ -308,7 +308,7 @@ export function AiRecommendationsCard({
       ) : (
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
-            Let AI suggest a break, a workout, or a meal based on how your day's going.
+            Let AI suggest a break, a workout, or a meal based on how your day&apos;s going.
           </p>
           <button
             disabled={generating}
