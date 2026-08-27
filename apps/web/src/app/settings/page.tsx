@@ -58,7 +58,7 @@ function CheckoutResultBanner() {
   if (result === 'success') {
     return (
       <p className="mx-4 mb-3 text-xs text-accent dark:text-accent-dark" role="status">
-        Checkout complete — this can take a few seconds to show up below while Stripe's own confirmation arrives.
+        Checkout complete — this can take a few seconds to show up below while Stripe&apos;s own confirmation arrives.
       </p>
     );
   }
@@ -448,7 +448,7 @@ export default function SettingsPage() {
             className="w-full rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-3 py-2 text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:ring-2 focus:ring-accent"
           />
           <p className="mt-1 text-xs text-text-secondary dark:text-text-secondary-dark">
-            Used in greetings around the app (e.g. Today's "Good morning, ___"). Leave blank to fall back to the
+            Used in greetings around the app (e.g. Today&apos;s &quot;Good morning, ___&quot;). Leave blank to fall back to the
             part of your email before the @.
           </p>
 
@@ -828,7 +828,7 @@ export default function SettingsPage() {
               would do nothing. */}
           {isDevAuth ? (
             <p className="mt-2 text-xs text-text-secondary dark:text-text-secondary-dark">
-              Email is fixed to <code>NEXT_PUBLIC_DEV_USER_EMAIL</code> in dev-auth mode — there's no real identity
+              Email is fixed to <code>NEXT_PUBLIC_DEV_USER_EMAIL</code> in dev-auth mode — there&apos;s no real identity
               provider here to change it through.
             </p>
           ) : (
@@ -929,7 +929,7 @@ export default function SettingsPage() {
           <h2 className="mb-1 text-sm font-medium text-danger dark:text-danger-dark">Danger zone</h2>
           <p className="mb-3 text-xs text-text-secondary dark:text-text-secondary-dark">
             Deleting your account permanently removes your tasks, goals, habits, calendar events, journal entries,
-            check-ins, focus sessions, routines, reflections, AI conversations, and AI memory. This can't be undone.
+            check-ins, focus sessions, routines, reflections, AI conversations, and AI memory. This can&apos;t be undone.
           </p>
           <label htmlFor="delete-confirm-input" className="mb-1 block text-xs text-text-secondary dark:text-text-secondary-dark">
             Type DELETE to confirm
