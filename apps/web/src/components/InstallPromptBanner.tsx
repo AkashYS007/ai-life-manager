@@ -199,7 +199,7 @@ export function InstallPromptBanner() {
                     />
                   </svg>
                 </span>{' '}
-                in Safari's toolbar, then choose <span className="font-medium">Add to Home Screen</span>.
+                in Safari&apos;s toolbar, then choose <span className="font-medium">Add to Home Screen</span>.
               </p>
               <div className="mt-3">
                 <button
