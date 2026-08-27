@@ -40,7 +40,7 @@ export function LandingPage() {
         </p>
         <p className="mt-4 text-base leading-relaxed text-text-secondary dark:text-text-secondary-dark">
           AI Life Manager plans your day around your energy, not just your deadlines. It reminds you to eat, move,
-          and rest, prioritizes your open tasks based on how you're actually feeling, and keeps everything in sync
+          and rest, prioritizes your open tasks based on how you&apos;re actually feeling, and keeps everything in sync
           with the calendar you already use.
         </p>
 
