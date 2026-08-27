@@ -66,6 +66,16 @@ jobs:
     defaults:
       run:
         working-directory: apps/web
+    env:
+      # next build statically prerenders /, /privacy, /terms, which mount
+      # <ClerkProvider> through the root layout — without a real Clerk key
+      # that throws "Missing publishableKey" and fails the build. Providers.tsx
+      # already has a sanctioned escape hatch for exactly this situation
+      # (no real Clerk credentials available): AUTH_MODE=dev skips
+      # <ClerkProvider> entirely, the same mode local dev and the sandbox
+      # environment use. CI has no real Clerk credentials and shouldn't need
+      # any — this is a build-time smoke test, not a deploy.
+      NEXT_PUBLIC_AUTH_MODE: 'dev'
     steps:
       - uses: actions/checkout@v4
 
