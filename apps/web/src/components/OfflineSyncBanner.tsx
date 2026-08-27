@@ -34,13 +34,13 @@ export function OfflineSyncBanner() {
           role="status"
           className="rounded-control border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark"
         >
-          {pendingCount} change{pendingCount === 1 ? '' : 's'} waiting to sync — will save automatically once you're back online.
+          {pendingCount} change{pendingCount === 1 ? '' : 's'} waiting to sync — will save automatically once you&apos;re back online.
         </div>
       )}
       {errors.length > 0 && (
         <div className="rounded-control border border-danger/40 bg-surface dark:bg-surface-dark px-3 py-2">
           <p className="text-xs text-danger dark:text-danger-dark" role="alert">
-            {errors.length} offline change{errors.length === 1 ? '' : 's'} couldn't be saved: {errors.map((e) => e.message).join('; ')}
+            {errors.length} offline change{errors.length === 1 ? '' : 's'} couldn&apos;t be saved: {errors.map((e) => e.message).join('; ')}
           </p>
           <button onClick={clearSyncErrors} className="mt-1 text-xs font-medium text-accent">
             Dismiss
