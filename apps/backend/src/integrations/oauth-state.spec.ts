@@ -1,3 +1,4 @@
+import { createHmac } from 'crypto';
 import { signOAuthState, verifyOAuthState, peekReturnTo } from './oauth-state';
 
 describe('oauth-state', () => {
@@ -40,7 +41,6 @@ describe('oauth-state', () => {
     const payload = Buffer.from(JSON.stringify({ userId: 'user-123', issuedAt: elevenMinutesAgo })).toString(
       'base64url',
     );
-    const { createHmac } = require('crypto');
     const signature = createHmac('sha256', secret).update(payload).digest('base64url');
     expect(() => verifyOAuthState(`${payload}.${signature}`, secret)).toThrow('expired');
   });
