@@ -11,6 +11,12 @@ export const envSchema = z.object({
   CLERK_SECRET_KEY: z.string().optional(),
   CLERK_PUBLISHABLE_KEY: z.string().optional(),
   FRONTEND_URL: z.string().default('http://localhost:3000'),
+  // Deployment-maturity pass (2026-08-27): optional error-monitoring
+  // integration, same graceful-degradation pattern as every other
+  // optional integration in this file — without it, errors just go to
+  // whatever Logger already writes to (stdout, Railway's log viewer), the
+  // same as before this existed.
+  SENTRY_DSN: z.string().optional(),
   // Google Calendar sync (pull-only increment) — all optional so the app
   // still boots for anyone who hasn't set up Google Cloud credentials yet;
   // the connect mutation reports GOOGLE_NOT_CONFIGURED instead of the whole
