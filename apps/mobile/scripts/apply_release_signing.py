@@ -5,11 +5,11 @@ ordering as apply_icons.py / apply_firebase_config.py / apply_webview_
 navigation_fix.py / apply_native_notifications.py, and for the same
 reason: android/ is regenerated from scratch on every CI run (see
 apps/mobile/README.md), so anything signing-related has to be re-applied
-here rather than committed as edited native source â and a real signing
+here rather than committed as edited native source — and a real signing
 keystore must never be committed to the repo at all regardless.
 
 Deployment-maturity pass (2026-08-28): before this script, every Android
-build in CI produced only an unsigned debug APK (`assembleDebug`) â
+build in CI produced only an unsigned debug APK (`assembleDebug`) —
 installable for testing, but not what the Play Store accepts for a real
 listing. Google requires every release upload to be signed with the same
 private key for the life of the app, so unlike this repo's other optional
@@ -17,7 +17,7 @@ integrations (Stripe, Twilio, Sentry, ...) this one is a one-way door: the
 keystore generated alongside this script is the *only* one that can ever
 sign updates to whatever package name has already been published under it.
 Losing it, or its passwords, after a real Play Store submission means the
-app can never be updated again under that listing â only shipped as a new
+app can never be updated again under that listing — only shipped as a new
 one. That is also exactly why this script never generates a keystore
 itself: it has to already exist somewhere durable (a password manager, a
 locked-down secrets vault) before this script has anything to read.
@@ -26,7 +26,7 @@ Optional and fully backward-compatible, same pattern as every other
 optional integration in this codebase (see apps/backend/src/config/
 env.validation.ts's own SENTRY_DSN comment): if ANDROID_KEYSTORE_BASE64
 isn't set, this script no-ops and android/app/build.gradle is left exactly
-as Capacitor's own template produces it â the existing unsigned
+as Capacitor's own template produces it — the existing unsigned
 `assembleDebug` build in android-build.yml keeps working unchanged for
 every fork/contributor who hasn't set up signing secrets. Four env vars,
 required together (same "all N or none" convention as this repo's other
@@ -45,12 +45,12 @@ Capacitor template that ships its own signingConfigs block by default):
 
 1. Decode ANDROID_KEYSTORE_BASE64 to android/app/release.keystore. This
    file exists only on disk during a CI run (or a local build where the
-   env vars happen to be set) â it is gitignored the same way android/
+   env vars happen to be set) — it is gitignored the same way android/
    itself is (see apps/mobile/.gitignore), never committed.
 2. Insert a `signingConfigs { release { ... } }` block right inside the
    top-level `android { ... }` block, reading all four values from the
    environment at *Gradle* build time (not baked into the file as literal
-   secrets) via System.getenv(...) â then point buildTypes.release at it
+   secrets) via System.getenv(...) — then point buildTypes.release at it
    with `signingConfig signingConfigs.release`.
 """
 import base64
@@ -88,7 +88,7 @@ def main():
     present = [name for name, value in values.items() if value]
 
     if not present:
-        print('no ANDROID_KEYSTORE_* env vars set â skipping release signing '
+        print('no ANDROID_KEYSTORE_* env vars set — skipping release signing '
               '(the build stays unsigned, see android-build.yml\'s debug-APK step)')
         return
 
@@ -96,12 +96,12 @@ def main():
     if missing:
         raise SystemExit(
             'partial release-signing config: '
-            f'{", ".join(present)} set but {", ".join(missing)} missing â '
+            f'{", ".join(present)} set but {", ".join(missing)} missing — '
             'all four ANDROID_KEYSTORE_*/ANDROID_KEY_* secrets are required together'
         )
 
     if not os.path.isdir(ANDROID_DIR):
-        raise SystemExit(f'android/ directory not found at {ANDROID_DIR} â run `npx cap add android` first')
+        raise SystemExit(f'android/ directory not found at {ANDROID_DIR} — run `npx cap add android` first')
 
     with open(KEYSTORE_DEST, 'wb') as f:
         f.write(base64.b64decode(values['ANDROID_KEYSTORE_BASE64']))
@@ -111,7 +111,7 @@ def main():
         app_contents = f.read()
 
     if 'signingConfigs {' in app_contents:
-        print('app/build.gradle already has a signingConfigs block â skipping insertion')
+        print('app/build.gradle already has a signingConfigs block — skipping insertion')
     else:
         match = re.search(r'(android\s*\{)', app_contents)
         if not match:
@@ -121,11 +121,11 @@ def main():
         print('added signingConfigs block to app/build.gradle')
 
     if 'signingConfig signingConfigs.release' in app_contents:
-        print('release buildType already references signingConfigs.release â skipping')
+        print('release buildType already references signingConfigs.release — skipping')
     else:
         # Targets the specific "release {" buildType block (there is only
         # one, Capacitor's default template never ships a third build type),
-        # not the "signingConfigs { release {" block just inserted above â
+        # not the "signingConfigs { release {" block just inserted above —
         # anchored on minifyEnabled, which only ever appears inside
         # buildTypes.release in this file.
         match = re.search(r'(release\s*\{\s*\n\s*minifyEnabled)', app_contents)
