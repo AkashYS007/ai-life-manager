@@ -15,6 +15,14 @@ import { TimezoneSync } from './TimezoneSync';
 import { OnboardingGate } from './OnboardingGate';
 import { SyncManager } from './SyncManager';
 import { NativePushRegistration } from './NativePushRegistration';
+import { initErrorMonitoring } from '../lib/error-monitoring';
+
+// A no-op when NEXT_PUBLIC_SENTRY_DSN isn't set (see error-monitoring.ts).
+// Called at module scope, same as this file's other client-only singletons
+// (apolloClient), so it runs once per page load rather than once per render.
+if (typeof window !== 'undefined') {
+  initErrorMonitoring();
+}
 
 const isDevAuth = process.env.NEXT_PUBLIC_AUTH_MODE === 'dev';
 
