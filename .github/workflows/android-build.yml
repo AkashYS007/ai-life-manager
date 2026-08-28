@@ -2,7 +2,7 @@ name: Build Android APK
 
 # Native app shell increment. The Android Gradle build needs to resolve the
 # Android SDK, the Android Gradle Plugin, and AndroidX from Google's Maven
-# repo (maven.google.com / dl.google.com) — none of which are reachable from
+# repo (maven.google.com / dl.google.com) â none of which are reachable from
 # the sandboxed environment this repo is usually edited from (its outbound
 # network is allowlisted to a short list of package registries, and Google's
 # Android infrastructure isn't on it). GitHub's own hosted runners have full
@@ -23,6 +23,21 @@ jobs:
     defaults:
       run:
         working-directory: apps/mobile
+    # Release-signing increment (deployment-maturity pass, 2026-08-28): four
+    # secrets, required together (see scripts/apply_release_signing.py's own
+    # module docstring for what each one is and why none of them can ever be
+    # committed). Surfaced at job level, not just passed to the one step
+    # that needs them, so the later `if: env.ANDROID_KEYSTORE_BASE64 != ''`
+    # conditions on the release-build/upload steps below can read them too â
+    # a step's own `env:` block isn't visible to its `if:` condition, only
+    # to its `run:`. Completely optional: a fork or contributor with none of
+    # these secrets set gets the exact same unsigned-debug-APK-only build
+    # this workflow has always produced.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +54,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # Deliberately not committed to the repo (see apps/mobile/README.md) —
+      # Deliberately not committed to the repo (see apps/mobile/README.md) â
       # regenerated fresh on every build from capacitor.config.ts, so there's
       # never a stale native project drifting from that config, and this repo
       # never has to carry the ~50 boilerplate files a Capacitor Android
@@ -52,19 +67,19 @@ jobs:
           pip install --quiet Pillow
           python3 scripts/apply_icons.py
 
-      # Native push notifications increment (2026-08-20) — wires the
+      # Native push notifications increment (2026-08-20) â wires the
       # committed apps/mobile/google-services.json into the freshly
       # scaffolded native project and makes sure the Google Services Gradle
       # plugin is actually applied, same "re-apply on every fresh scaffold"
       # reasoning as the icon step above. See that script's own comment for
       # why google-services.json is safe to commit (it's client
       # configuration, not a secret) and why the real Admin SDK credential
-      # never appears in this workflow at all — that one lives only in the
+      # never appears in this workflow at all â that one lives only in the
       # backend's own Railway environment.
       - name: Apply Firebase configuration
         run: python3 scripts/apply_firebase_config.py
 
-      # WebView navigation bug fix (2026-08-20) — see
+      # WebView navigation bug fix (2026-08-20) â see
       # scripts/apply_webview_navigation_fix.py's own comment for the full
       # story: Capacitor's default WebViewClient was handing the entire app
       # out to the system browser on almost every real launch, because it
@@ -77,12 +92,12 @@ jobs:
       - name: Apply WebView navigation fix
         run: python3 scripts/apply_webview_navigation_fix.py
 
-      # Voice + reliable-banner notifications increment (2026-08-20) — see
+      # Voice + reliable-banner notifications increment (2026-08-20) â see
       # scripts/apply_native_notifications.py's own comment for the full
       # story: a data-only FCM message (see native-push.service.ts) never
       # gets auto-displayed by the OS on its own, and the
       # @capacitor/push-notifications plugin's own default
-      # FirebaseMessagingService only ever forwards it to this app's JS —
+      # FirebaseMessagingService only ever forwards it to this app's JS â
       # which never runs when the app is backgrounded or killed, so nothing
       # showed and nothing spoke in exactly the case this feature exists
       # for. Same "re-apply on every fresh scaffold" reasoning as every
@@ -93,9 +108,18 @@ jobs:
       - name: Apply native notifications (voice + banner)
         run: python3 scripts/apply_native_notifications.py
 
+      # Release-signing increment (2026-08-28) â see
+      # scripts/apply_release_signing.py's own module docstring for the full
+      # story: no-ops entirely (build.gradle untouched) unless all four
+      # ANDROID_KEYSTORE_*/ANDROID_KEY_* secrets above are set, so this is
+      # safe to run on every build regardless of whether signing has been
+      # set up yet.
+      - name: Apply release signing (optional)
+        run: python3 scripts/apply_release_signing.py
+
       # `webDir` in capacitor.config.ts points at `www/` even though this
       # app runs in remote-URL mode and never actually serves anything from
-      # it — `cap sync` still expects the directory to exist before it will
+      # it â `cap sync` still expects the directory to exist before it will
       # copy config into the native project.
       - name: Create placeholder web asset dir
         run: mkdir -p www && echo '<html></html>' > www/index.html
@@ -115,4 +139,23 @@ jobs:
         with:
           name: ai-life-manager-debug-apk
           path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Release-signing increment (2026-08-28): only runs once the four
+      # secrets above are actually configured â see this job's own `env:`
+      # comment for why `env.` (not `secrets.`) is what a step's `if:` can
+      # actually read. Produces a real Play-Store-ready signed release APK
+      # alongside the debug one above (which keeps building unconditionally,
+      # so nothing here can regress the existing debug workflow).
+      - name: Build signed release APK
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload signed release APK artifact
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-life-manager-release-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
