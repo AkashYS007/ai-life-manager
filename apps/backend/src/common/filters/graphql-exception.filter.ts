@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import { GraphQLError } from 'graphql';
+import { reportError } from '../sentry';
 
 // Anything that reaches here is, by definition, not an expected UserError
 // (those are returned as normal payload values by resolvers — see
@@ -20,6 +21,11 @@ export class GraphqlExceptionFilter implements ExceptionFilter {
     }
 
     this.logger.error('Unhandled exception', exception instanceof Error ? exception.stack : exception);
+    // Deployment-maturity pass (2026-08-27): report to Sentry (a no-op
+    // when SENTRY_DSN isn't set) — this is genuinely the "unexpected" bucket
+    // this filter's own comment describes, the exact class of error the
+    // scorecard's "no monitoring/alerts" finding was about.
+    reportError(exception);
     return new GraphQLError('Something went wrong on our end. Please try again.', {
       extensions: { code: 'INTERNAL_ERROR' },
     });
