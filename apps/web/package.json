@@ -13,6 +13,7 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/push-notifications": "^8.0.0",
     "@clerk/nextjs": "^6.39.6",
+    "@sentry/browser": "^8.55.2",
     "apollo3-cache-persist": "^0.15.0",
     "graphql": "^16.9.0",
     "graphql-ws": "^5.16.0",
