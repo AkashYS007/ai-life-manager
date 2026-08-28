@@ -3,6 +3,7 @@ import { Args, ID, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '../auth/auth.guard';
 import { GqlThrottlerGuard } from '../common/guards/gql-throttler.guard';
+import { AiBudgetGuard } from '../common/guards/ai-budget.guard';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthContext } from '../auth/auth-context';
 import { UsersService } from '../users/users.service';
@@ -49,7 +50,7 @@ export class PlannerResolver {
   // yet) but not unbounded — matches this query's own "fail soft, return
   // null" design (backend review follow-up, 2026-08-24 — AI/planner audit
   // finding: unvalidated, unbounded args feeding directly into an LLM call).
-  @UseGuards(GqlThrottlerGuard)
+  @UseGuards(GqlThrottlerGuard, AiBudgetGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Query(() => Int, { nullable: true })
   async estimateTaskDuration(
@@ -73,7 +74,7 @@ export class PlannerResolver {
   // pattern (nobody presses "regenerate my plan" more than a couple of
   // times a minute) while still closing the unbounded-loop/scripted-abuse
   // gap the audit raised.
-  @UseGuards(GqlThrottlerGuard)
+  @UseGuards(GqlThrottlerGuard, AiBudgetGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Mutation(() => RequestReplanPayload)
   async requestReplan(
