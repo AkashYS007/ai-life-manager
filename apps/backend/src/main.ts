@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
+import { initSentry, reportError } from './common/sentry';
 
 async function bootstrap() {
   // `rawBody: true` — real Stripe billing integration. Stripe's webhook
@@ -15,6 +16,19 @@ async function bootstrap() {
   // route completely unchanged.
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
+
+  // Optional error monitoring (2026-08-27) — a no-op when SENTRY_DSN isn't
+  // set, same as every other optional integration in this app. GraphQL
+  // resolver errors are reported via the `formatError` hook on the
+  // GraphQLModule below (Nest's global exception filters don't reliably
+  // intercept those); this call also covers uncaught errors from process
+  // start itself, before any request-scoped handling exists yet.
+  initSentry(config.get<string>('SENTRY_DSN'));
+
+  process.on('unhandledRejection', (reason) => {
+    reportError(reason);
+    Logger.error('Unhandled promise rejection', reason instanceof Error ? reason.stack : String(reason), 'Bootstrap');
+  });
 
   // CORS fix (2026-08-24, backend audit Update 49 finding #2): this used to
   // be `{ origin: true, credentials: true }`, which reflects *any* request's
