@@ -85,7 +85,16 @@ export class ReflectionService {
     };
 
     let aiSummary: string | undefined;
-    if (this.anthropic.isConfigured()) {
+    // AI monthly cost cap (performance/scalability pass, 2026-08-28) —
+    // checked before the configured-check even bothers to run the AI call,
+    // same check-and-skip-silently discipline as JournalService's
+    // scoreSentimentInBackground: this is a best-effort enhancement on a
+    // reflection submission, so exceeding budget must skip the summary,
+    // never block saving the reflection itself.
+    const overBudget = this.anthropic.isConfigured() && (await this.aiUsage.isOverBudget(userId));
+    if (overBudget) {
+      this.logger.warn(`Skipping daily reflection AI summary for user ${userId} — monthly AI budget exceeded.`);
+    } else if (this.anthropic.isConfigured()) {
       try {
         const system =
           "You are summarizing someone's end-of-day reflection for a personal life-planning app. Write one warm, specific, encouraging sentence or two — not generic productivity-coach language — that reflects what they actually wrote. Do not invent details they didn't mention.";
