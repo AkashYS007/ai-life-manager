@@ -14,6 +14,22 @@ const FACT_TYPE = 'preference'; // the only fact_type the manual CRUD API (creat
 // Journal sentiment analysis increment adds 'journal_sentiment' — see
 // refreshJournalSentimentPattern below for where it's actually written.
 const CONTEXT_FACT_TYPES = ['preference', 'intervention_response', 'task_duration_accuracy', 'chronotype', 'journal_sentiment'];
+// Deployment-maturity performance pass (2026-08-28, Update 64): only
+// 'preference' facts can actually grow without bound — every manual
+// create() call (from the /memory page, and from chat's add_memory_fact
+// tool) generates a fresh row with no upsert/de-dup, while the other four
+// CONTEXT_FACT_TYPES above are each capped to exactly one row per user via
+// upsert-by-fixed-key (see refreshInterventionResponsePattern/
+// refreshTaskDurationAccuracyPattern/refreshChronotypePattern/
+// refreshJournalSentimentPattern below). Left uncapped, a long-time power
+// user's accumulated preferences would make every single planner/chat/
+// recommendations prompt this person ever sends larger and more expensive,
+// forever. Capping buildContextBlock's read, not the underlying data: older
+// preferences just silently drop out of the *prompt* once a person has more
+// than this many — they're never deleted, and still show up in full on the
+// /memory page (see listForUser, deliberately uncapped, since someone
+// reviewing/editing their own list should see everything they've written).
+const MAX_PREFERENCE_FACTS_IN_CONTEXT = 30;
 
 const MIN_PLAN_RESPONSES_FOR_PATTERN = 3;
 const PLAN_RESPONSE_SAMPLE_SIZE = 10;
@@ -198,10 +214,22 @@ export class MemoryService {
   // whether to include a section at all — an honest empty state, same
   // principle as every other "nothing here yet" case in this app.
   async buildContextBlock(userId: string): Promise<string> {
-    const records = await this.prisma.aiMemoryFact.findMany({
-      where: { userId, factType: { in: CONTEXT_FACT_TYPES } },
-      orderBy: { updatedAt: 'desc' },
-    });
+    // Two separate queries, not one — see MAX_PREFERENCE_FACTS_IN_CONTEXT's
+    // own comment: 'preference' is the one fact type that needs a real
+    // `take` cap, and the other four are naturally bounded to at most one
+    // row each already, so there's no reason to cap them too.
+    const [preferenceFacts, otherFacts] = await Promise.all([
+      this.prisma.aiMemoryFact.findMany({
+        where: { userId, factType: FACT_TYPE },
+        orderBy: { updatedAt: 'desc' },
+        take: MAX_PREFERENCE_FACTS_IN_CONTEXT,
+      }),
+      this.prisma.aiMemoryFact.findMany({
+        where: { userId, factType: { in: CONTEXT_FACT_TYPES.filter((type) => type !== FACT_TYPE) } },
+        orderBy: { updatedAt: 'desc' },
+      }),
+    ]);
+    const records = [...preferenceFacts, ...otherFacts];
     if (records.length === 0) return '';
     return records.map((r) => `- ${(r.value as unknown as StoredValue).text}`).join('\n');
   }
