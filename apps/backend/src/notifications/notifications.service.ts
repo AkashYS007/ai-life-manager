@@ -8,6 +8,7 @@ import { WebPushService } from '../push/web-push.service';
 import { NativePushService } from '../push/native-push.service';
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
+import { withSchedulerLock } from '../common/scheduler-lock';
 
 interface StoredPayload {
   title: string;
@@ -22,6 +23,16 @@ const RECENT_SAMPLE_SIZE = 20;
 // batching infrastructure: generating a plan twice in an afternoon should
 // refresh one "your plan is ready" notification, not stack two.
 const BATCH_WINDOW_HOURS = 12;
+// Deployment-maturity performance pass (2026-08-28, Update 64): notification
+// rows were never deleted or archived — a real, flagged gap ("notification
+// retention: needed eventually") on the app's own performance scorecard.
+// 90 days is comfortably longer than anyone would realistically want to
+// scroll back through in the in-app list (listRecent already only ever
+// shows the most recent 20 anyway), while still keeping a real window for
+// support/debugging. Only rows that have already been read or delivered
+// are eligible — see pruneOldNotifications below — so nothing still
+// pending delivery is ever at risk of being pruned out from under it.
+const NOTIFICATION_RETENTION_DAYS = 90;
 
 function toGraphNotification(record: any): Notification {
   const payload = record.payload as StoredPayload;
@@ -40,17 +51,22 @@ function toGraphNotification(record: any): Notification {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  // Overlap/race fixes (2026-08-24, backend audit Update 49 finding #7,
-  // medium severity). Two related but distinct problems, two distinct
+  // Overlap/race fixes. Two related but distinct problems, two distinct
   // guards:
   //
-  // 1. `deliverDueRunning` — @nestjs/schedule's plain @Cron has no
-  //    built-in protection against a new tick starting while the previous
-  //    invocation of the *same* cron method is still running. Cheap,
-  //    in-process, single-instance-only (fine here — this app runs as one
-  //    Railway service, confirmed during the Update 48 deploy work; a
-  //    multi-instance deployment would need a real distributed lock
-  //    instead).
+  // 1. The `deliverDueNotifications` cron's own overlap guard — @nestjs/
+  //    schedule's plain @Cron has no built-in protection against a new
+  //    tick starting while the previous invocation of the *same* job is
+  //    still running. Originally (2026-08-24, backend audit Update 49
+  //    finding #7) this was a plain in-process boolean, which is only ever
+  //    safe on a single instance. Deployment-maturity performance pass
+  //    (2026-08-28, Update 64): replaced with a real cross-instance lock
+  //    (see common/scheduler-lock.ts and schema.prisma's SchedulerLock
+  //    model) — this app was still confirmed running as one Railway
+  //    replica at the time of that fix, but the old in-process guard would
+  //    have provided zero protection the moment a second replica was ever
+  //    added, silently reopening the exact duplicate-notification risk
+  //    this whole mechanism exists to prevent.
   //
   // 2. `createLocks` — the deeper fix, and the one that actually closes
   //    the race regardless of *what* triggers it. `create()`'s own
@@ -64,8 +80,13 @@ export class NotificationsService {
   //    that decision+write, so the second caller always sees the first
   //    one's already-created row before deciding what to do — a would-be
   //    duplicate becomes a batched update instead, this file's own
-  //    documented intent.
-  private deliverDueRunning = false;
+  //    documented intent. Still in-process/single-instance only, same as
+  //    before — but now that the cron-level lock above guarantees only one
+  //    instance is ever inside deliverDueNotifications at a time, and
+  //    checkReminders (SchedulerService, the other real caller of
+  //    create()) has its own equivalent cron-level lock too, this map only
+  //    ever needs to serialize calls happening within one process at a
+  //    time, which is exactly what it already did.
   private readonly createLocks = new Map<string, Promise<unknown>>();
 
   constructor(
@@ -148,13 +169,9 @@ export class NotificationsService {
   // the Architecture Document's Temporal-based design).
   @Cron('*/15 * * * *')
   async deliverDueNotifications(): Promise<void> {
-    // Overlap guard — see this class's own comment on `deliverDueRunning`.
-    if (this.deliverDueRunning) {
-      this.logger.warn('deliverDueNotifications sweep skipped — the previous invocation is still running.');
-      return;
-    }
-    this.deliverDueRunning = true;
-    try {
+    // Overlap guard — see this class's own comment above on why this is a
+    // real cross-instance lock, not an in-process boolean.
+    await withSchedulerLock(this.prisma, 'deliver-due-notifications', async () => {
       const due = await this.prisma.notification.findMany({
         where: { scheduledFor: { lte: new Date() }, deliveredAt: null },
         take: 200,
@@ -169,9 +186,30 @@ export class NotificationsService {
           this.logger.warn(`Sweep delivery failed for notification ${notification.id}: ${(error as Error).message}`);
         }
       }
-    } finally {
-      this.deliverDueRunning = false;
-    }
+    });
+  }
+
+  // Notification retention increment (2026-08-28, Update 64) — see
+  // NOTIFICATION_RETENTION_DAYS's own comment for the reasoning. Runs once
+  // daily, off the same cross-instance lock as the other two sweeps (a
+  // delete-heavy job is exactly the kind of thing that shouldn't
+  // accidentally run twice concurrently either, even though the query
+  // itself would still be correct if it did — no need to take that chance
+  // for a job this cheap to just serialize).
+  @Cron('0 4 * * *')
+  async pruneOldNotifications(): Promise<void> {
+    await withSchedulerLock(this.prisma, 'prune-old-notifications', async () => {
+      const cutoff = DateTime.now().minus({ days: NOTIFICATION_RETENTION_DAYS }).toJSDate();
+      const result = await this.prisma.notification.deleteMany({
+        where: {
+          createdAt: { lt: cutoff },
+          OR: [{ readAt: { not: null } }, { deliveredAt: { not: null } }],
+        },
+      });
+      if (result.count > 0) {
+        this.logger.log(`Pruned ${result.count} notification(s) older than ${NOTIFICATION_RETENTION_DAYS} days.`);
+      }
+    });
   }
 
   // Computes when a notification should actually become visible, pushing it
