@@ -1,3 +1,8 @@
+## 4. `apps/mobile/scripts/apply_native_notifications.py` — select all, replace
+
+Native Android side: reads the new `voiceEnabled` FCM data field and skips text-to-speech when it's `"false"`.
+
+```python
 #!/usr/bin/env python3
 """Voice + reliable-banner notifications increment (2026-08-20). Run *after*
 `npx cap add android` and *before* `npx cap sync android`, same ordering and
@@ -118,6 +123,16 @@ public class AiLifeManagerMessagingService extends MessagingService {
         String title = data.get("title");
         String body = data.get("body");
         String deeplink = data.get("deeplink");
+        // Voice notification control (Production Hardening Sprint 1,
+        // 2026-08-29): resolved server-side from the real
+        // User.voiceNotificationsEnabled column (see
+        // NotificationsService.attemptDelivery's own comment) and carried
+        // down as a plain string data field, same as deeplink. Fail-open on
+        // purpose: only the literal string "false" turns voice off -- a
+        // missing field (an older sender, or any future FCM traffic this
+        // app doesn't originate) or any other value keeps today's original
+        // always-on behavior rather than silently going mute.
+        boolean voiceEnabled = !"false".equals(data.get("voiceEnabled"));
         // Guards against any future FCM traffic this app might ever send
         // that isn't one of NativePushService's own reminder pushes (none
         // exist today, but this class shouldn't assume that stays true
@@ -127,7 +142,9 @@ public class AiLifeManagerMessagingService extends MessagingService {
         }
 
         showBanner(title, body, deeplink);
-        speakIfPhoneIsAudible(title, body);
+        if (voiceEnabled) {
+            speakIfPhoneIsAudible(title, body);
+        }
     }
 
     private void showBanner(String title, String body, String deeplink) {
@@ -279,3 +296,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+```
+
+---
