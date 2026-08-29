@@ -1,8 +1,3 @@
-## 5. `apps/backend/src/billing/billing.resolver.ts` — select all, replace
-
-Adds rate limiting (10/min) to the two Stripe-calling mutations, matching the treatment the AI endpoints already got in Update 53.
-
-```typescript
 import { UseGuards } from '@nestjs/common';
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
 import { Throttle } from '@nestjs/throttler';
@@ -111,6 +106,3 @@ export class BillingResolver {
     }
   }
 }
-```
-
----
