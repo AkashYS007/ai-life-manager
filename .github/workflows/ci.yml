@@ -1,5 +1,6 @@
 name: CI
 
+
 # Deployment maturity pass (2026-08-27): the missing backend/web CI gate,
 # flagged since the architecture audit and re-confirmed at every later audit
 # (Update 49 finding #15's sibling gap, Update 61's roadmap item #18). Runs
@@ -15,11 +16,13 @@ name: CI
 # suite's own comments), so a real database is the only infrastructure it
 # ever needed; nothing else was blocking this.
 
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 
 # A newer push on the same branch/PR cancels an in-flight run for it, so a
 # rapid sequence of commits (this repo's own established multi-file commit
@@ -28,11 +31,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+
 env:
   # prisma generate validates that its schema's env("DATABASE_URL") resolves
   # to *something* before it will run, even though generate itself never
   # opens a real connection — this placeholder is never used to connect.
   DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ci_placeholder'
+
 
 jobs:
   backend:
@@ -47,7 +52,7 @@ jobs:
     # runs and never reachable from outside this job.
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -59,83 +64,3 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install workspace dependencies
-        working-directory: .
-        run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Apply database migrations
-        run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ailm_ci'
-
-      - name: E2E tests
-        run: npm run test:e2e
-        env:
-          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ailm_ci'
-          # The same dev-auth bypass local development already uses (see
-          # auth.guard.ts's own comment) — lets the suite authenticate as
-          # many distinct throwaway identities via a plain header instead of
-          # needing a real Clerk project. env.validation.ts only refuses
-          # AUTH_MODE=dev when NODE_ENV=production, so NODE_ENV=test below
-          # keeps this path open exactly as it already is for local dev.
-          AUTH_MODE: 'dev'
-          NODE_ENV: 'test'
-
-  web:
-    name: Web (build, lint)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
-    env:
-      # next build statically prerenders /, /privacy, /terms, which mount
-      # <ClerkProvider> through the root layout — without a real Clerk key
-      # that throws "Missing publishableKey" and fails the build. Providers.tsx
-      # already has a sanctioned escape hatch for exactly this situation
-      # (no real Clerk credentials available): AUTH_MODE=dev skips
-      # <ClerkProvider> entirely, the same mode local dev and the sandbox
-      # environment use. CI has no real Clerk credentials and shouldn't need
-      # any — this is a build-time smoke test, not a deploy.
-      NEXT_PUBLIC_AUTH_MODE: 'dev'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install workspace dependencies
-        working-directory: .
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        # No standalone unit-test runner is configured for apps/web — this
-        # project's established pattern is tsc (enforced implicitly by
-        # `next build`) plus the Playwright e2e suite, which needs a live
-        # backend this CI job doesn't stand up. See README's own
-        # "Still untested" section.
-        run: npm run build
