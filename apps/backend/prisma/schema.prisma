@@ -900,6 +900,17 @@ model FocusSession {
   createdAt              DateTime           @default(now()) @map("created_at")
 
   @@index([userId, startedAt])
+  // Deployment-maturity performance pass (2026-08-28, Update 64): closes a
+  // real missing index found during a fact-check of the app's own
+  // performance scorecard. FocusService.getCompletedMinutesForTask filters
+  // by (userId, taskId, status, kind) — a real, live query, called every
+  // time a task's "how long was actually spent on this" is asked for — but
+  // the only index on this table before this pass was (userId, startedAt),
+  // which doesn't help that query pattern at all. Prisma doesn't auto-index
+  // foreign-key columns, so taskId had no index of its own either. A power
+  // user with years of focus-session history was doing a full per-user
+  // index scan on every one of these lookups instead of a targeted one.
+  @@index([userId, taskId])
   @@map("focus_sessions")
 }
 
@@ -987,6 +998,11 @@ model Notification {
 
   @@index([userId, status, scheduledFor])
   @@index([scheduledFor, deliveredAt])
+  // Deployment-maturity performance pass (2026-08-28, Update 64): supports
+  // the new notification-retention cleanup job (see
+  // NotificationsService.pruneOldNotifications) — without this, that job's
+  // delete-by-age query would have to scan the entire table on every run.
+  @@index([createdAt])
   @@map("notifications")
 }
 
@@ -1045,4 +1061,31 @@ model NativePushToken {
 
   @@index([userId])
   @@map("native_push_tokens")
+}
+
+// Deployment-maturity performance pass (2026-08-28, Update 64): a real
+// cross-instance lock backing the three periodic sweeps that used to rely
+// on plain in-process booleans (SchedulerService.checkReminders and
+// .renewCalendarWebhooks, NotificationsService.deliverDueNotifications) —
+// see SchedulerService's own comment for the full "why this used to be
+// fine at one Railway replica but wouldn't be at two" history. This is a
+// plain atomic UPSERT-with-TTL lease, deliberately not Postgres's own
+// pg_advisory_lock: an advisory lock is tied to one specific database
+// session/connection, and holding one open for an entire multi-minute
+// all-users sweep would pin one whole connection out of Prisma's pool
+// exclusively for that job's full duration — a real risk on a small pool.
+// This table-based lease is acquired and released with ordinary queries
+// through the normal pool (see common/scheduler-lock.ts), and self-heals
+// via expiresAt if a process ever crashes mid-run without releasing it —
+// no separate cleanup job needed for that case.
+model SchedulerLock {
+  // A fixed, human-readable id per job — 'check-reminders',
+  // 'deliver-due-notifications', 'renew-calendar-webhooks' — not an
+  // auto-generated uuid, since there's deliberately at most one row per
+  // job ever, acquired via upsert.
+  id        String   @id
+  lockedAt  DateTime @default(now()) @map("locked_at")
+  expiresAt DateTime @map("expires_at")
+
+  @@map("scheduler_locks")
 }
