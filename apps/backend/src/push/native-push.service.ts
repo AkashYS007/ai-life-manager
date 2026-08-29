@@ -1,8 +1,3 @@
-## 2. `apps/backend/src/push/native-push.service.ts` — select all, replace
-
-Adds the `voiceEnabled` field to the native FCM data payload so the app can honor the user's voice-notification preference.
-
-```typescript
 import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { PrismaService } from '../prisma/prisma.service';
@@ -171,6 +166,3 @@ export class NativePushService {
     );
   }
 }
-```
-
----
