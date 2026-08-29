@@ -1967,7 +1967,52 @@ describe('Habits (e2e)', () => {
     expect(res.body.data.updateHabit.errors[0].code).toBe('UPDATE_FAILED');
   });
 
-  it('reactivateHabit brings a deactivated habit back into todayPlan.habits and the active-only list — the one-way trap this increment closes', async () => {
+  // Production Hardening Sprint 1 (2026-08-29) regression coverage for the
+  // Update 50 IDOR fix (backend audit finding #4) on the Habit→Goal side —
+  // habits.service.ts's requireOwnedGoal check has had no test guarding it
+  // from regressing until now, even though the equivalent Task→Goal/Tag
+  // coverage was just added alongside it in the Tasks & Goals block above.
+  it("rejects creating a habit linked to another user's goal, and does not create the habit", async () => {
+    const otherEmail = `habits-e2e-goal-owner-${Date.now()}@example.com`;
+    const otherGoal = await request(app.getHttpServer())
+      .post('/graphql')
+      .set('x-dev-user-email', otherEmail)
+      .send({ query: `mutation { createGoal(input: { title: "Someone else's habit goal" }) { goal { id } errors { code } } }` });
+    const otherGoalId = otherGoal.body.data.createGoal.goal.id;
+
+    const attempt = await gql(
+      `mutation { createHabit(input: { title: "Hijack attempt", frequency: DAILY, goalId: "${otherGoalId}" }) { habit { id } errors { code message } } }`,
+    );
+    expect(attempt.body.data.createHabit.habit).toBeNull();
+    expect(attempt.body.data.createHabit.errors[0].code).toBe('CREATE_FAILED');
+
+    const mine = await gql(`{ habits { title } }`);
+    expect(mine.body.data.habits.some((h: any) => h.title === 'Hijack attempt')).toBe(false);
+  });
+
+  it("rejects linking an existing habit to another user's goal via updateHabit", async () => {
+    const otherEmail = `habits-e2e-goal-owner-update-${Date.now()}@example.com`;
+    const otherGoal = await request(app.getHttpServer())
+      .post('/graphql')
+      .set('x-dev-user-email', otherEmail)
+      .send({ query: `mutation { createGoal(input: { title: "Another user's other goal" }) { goal { id } errors { code } } }` });
+    const otherGoalId = otherGoal.body.data.createGoal.goal.id;
+
+    const mine = await gql(`mutation { createHabit(input: { title: "My own habit", frequency: DAILY }) { habit { id } errors { code } } }`);
+    const myHabitId = mine.body.data.createHabit.habit.id;
+
+    const attempt = await gql(
+      `mutation { updateHabit(id: "${myHabitId}", input: { goalId: "${otherGoalId}" }) { habit { id goal { id } } errors { code message } } }`,
+    );
+    expect(attempt.body.data.updateHabit.habit).toBeNull();
+    expect(attempt.body.data.updateHabit.errors[0].code).toBe('UPDATE_FAILED');
+
+    const reread = await gql(`{ habits { id goal { id } } }`);
+    const found = reread.body.data.habits.find((h: any) => h.id === myHabitId);
+    expect(found.goal).toBeNull();
+  });
+
+it('reactivateHabit brings a deactivated habit back into todayPlan.habits and the active-only list — the one-way trap this increment closes', async () => {
     const create = await gql(
       `mutation { createHabit(input: { title: "Cold shower", frequency: DAILY }) { habit { id } errors { code } } }`,
     );
