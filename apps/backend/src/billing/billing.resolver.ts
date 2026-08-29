@@ -1,8 +1,15 @@
+## 5. `apps/backend/src/billing/billing.resolver.ts` — select all, replace
+
+Adds rate limiting (10/min) to the two Stripe-calling mutations, matching the treatment the AI endpoints already got in Update 53.
+
+```typescript
 import { UseGuards } from '@nestjs/common';
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthContext } from '../auth/auth-context';
+import { GqlThrottlerGuard } from '../common/guards/gql-throttler.guard';
 import { BillingService } from './billing.service';
 import { CreateCheckoutSessionPayload } from './models/create-checkout-session.payload';
 import { CreateBillingPortalSessionPayload } from './models/create-billing-portal-session.payload';
@@ -22,6 +29,17 @@ import { SubscriptionTier } from '../users/models/subscription.model';
 export class BillingResolver {
   constructor(private readonly billingService: BillingService) {}
 
+  // Rate limiting (Production Hardening Sprint 1, 2026-08-29): each of
+  // these two mutations calls a real Stripe API (creating a live Checkout
+  // Session / Billing Portal Session server-side, respectively) — an
+  // unthrottled loop against either was a real, if minor, gap this
+  // resolver never closed when the AI-calling endpoints got the same
+  // treatment in Update 53. 10/min is generous for genuine use (nobody
+  // legitimately opens checkout or billing-portal more than a couple of
+  // times a minute) while bounding how many live Stripe API objects one
+  // account can spin up in a burst.
+  @UseGuards(GqlThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Mutation(() => CreateCheckoutSessionPayload)
   async createCheckoutSession(
     @CurrentAuth() auth: AuthContext,
@@ -58,6 +76,8 @@ export class BillingResolver {
     }
   }
 
+  @UseGuards(GqlThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Mutation(() => CreateBillingPortalSessionPayload)
   async createBillingPortalSession(@CurrentAuth() auth: AuthContext): Promise<CreateBillingPortalSessionPayload> {
     try {
@@ -91,3 +111,6 @@ export class BillingResolver {
     }
   }
 }
+```
+
+---
