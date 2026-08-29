@@ -108,6 +108,17 @@ export class JournalService {
   private async scoreSentimentInBackground(userId: string, entryId: string, content: string): Promise<void> {
     let sentimentScore: number | null = null;
     try {
+      // AI monthly cost cap (performance/scalability pass, 2026-08-28) —
+      // this is a best-effort background side effect of saving a journal
+      // entry, not a user-initiated AI request, so it can't go through
+      // AiBudgetGuard the way a resolver-level mutation does (that would
+      // incorrectly block the entry save itself). Instead: check-and-skip
+      // silently here, same "never let AI failure block the primary save"
+      // discipline this whole method already follows for a real API error.
+      if (await this.aiUsage.isOverBudget(userId)) {
+        this.logger.warn(`Skipping journal sentiment scoring for user ${userId} — monthly AI budget exceeded.`);
+        return;
+      }
       const { score, modelUsed, usage } = await this.anthropic.analyzeSentiment(content);
       sentimentScore = score;
       void this.aiUsage.record({
