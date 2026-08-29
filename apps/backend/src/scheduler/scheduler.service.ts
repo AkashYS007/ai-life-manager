@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DateTime } from 'luxon';
 import { PrismaService } from '../prisma/prisma.service';
+import { withSchedulerLock } from '../common/scheduler-lock';
 import { RoutinesService } from '../routines/routines.service';
 import { RoutineType } from '../routines/models/routine.model';
 import { ReflectionService } from '../reflection/reflection.service';
@@ -146,20 +147,23 @@ function withinClockWindow(now: DateTime, hour: number): boolean {
 export class SchedulerService {
   private readonly logger = new Logger(SchedulerService.name);
 
-  // Overlap guard (2026-08-24, backend audit Update 49 finding #7, medium
-  // severity) — @nestjs/schedule's plain @Cron has no built-in protection
-  // against a new tick starting while the previous invocation of the same
-  // job is still running. `checkReminders` loops over every user, doing
-  // real DB work plus (for anyone in their local morning hour) a real
-  // Anthropic API call per person — at scale, or during a latency spike,
-  // one sweep can plausibly run past the next 15-minute tick. See
-  // NotificationsService's own `createLocks` for the other, deeper half of
-  // this same fix: even with this guard, two *different* cron jobs (this
-  // one and NotificationsService.deliverDueNotifications) or two unrelated
-  // callers could still race into creating a duplicate notification for
-  // the same person — that's closed at the point it's actually written,
-  // not just here at the sweep level.
-  private checkRemindersRunning = false;
+  // Overlap guard — @nestjs/schedule's plain @Cron has no built-in
+  // protection against a new tick starting while the previous invocation
+  // of the same job is still running. `checkReminders` loops over every
+  // user, doing real DB work plus (for anyone in their local morning hour)
+  // a real Anthropic API call per person — at scale, or during a latency
+  // spike, one sweep can plausibly run past the next 15-minute tick.
+  // Originally (2026-08-24, backend audit Update 49 finding #7) this was a
+  // plain in-process boolean; deployment-maturity performance pass
+  // (2026-08-28, Update 64) replaced it with a real cross-instance lock
+  // (common/scheduler-lock.ts) — see that file and NotificationsService's
+  // matching comment for the full reasoning. See NotificationsService's own
+  // `createLocks` for the other, deeper half of this same fix: even with
+  // this guard, two *different* cron jobs (this one and
+  // NotificationsService.deliverDueNotifications) or two unrelated callers
+  // could still race into creating a duplicate notification for the same
+  // person — that's closed at the point it's actually written, not just
+  // here at the sweep level.
 
   constructor(
     private readonly prisma: PrismaService,
@@ -182,49 +186,55 @@ export class SchedulerService {
   // never a hard failure a person would notice immediately.
   @Cron('0 3 * * *')
   async renewCalendarWebhooks(): Promise<void> {
-    const expiringBefore = new Date(Date.now() + WEBHOOK_RENEWAL_LOOKAHEAD_HOURS * 60 * 60 * 1000);
-    const accounts = await this.prisma.calendarAccount.findMany({
-      where: {
-        provider: { in: ['GOOGLE', 'MICROSOFT'] },
-        OR: [{ webhookExpiresAt: null }, { webhookExpiresAt: { lt: expiringBefore } }],
-      },
-      select: { id: true, provider: true },
-    });
+    // Overlap guard (deployment-maturity performance pass, 2026-08-28,
+    // Update 64) — this job had none at all before this pass, unlike
+    // checkReminders/deliverDueNotifications. Lower real risk day-to-day
+    // (it only runs once a day, not every 15 minutes) but a large enough
+    // sequential sweep of connected calendar accounts, each requiring 2-3
+    // real Google/Microsoft API round trips, could in principle still be
+    // running when the next day's 3am tick fires — this closes that gap
+    // with the same real cross-instance lock the other two sweeps now use.
+    await withSchedulerLock(this.prisma, 'renew-calendar-webhooks', async () => {
+      const expiringBefore = new Date(Date.now() + WEBHOOK_RENEWAL_LOOKAHEAD_HOURS * 60 * 60 * 1000);
+      const accounts = await this.prisma.calendarAccount.findMany({
+        where: {
+          provider: { in: ['GOOGLE', 'MICROSOFT'] },
+          OR: [{ webhookExpiresAt: null }, { webhookExpiresAt: { lt: expiringBefore } }],
+        },
+        select: { id: true, provider: true },
+      });
 
-    for (const account of accounts) {
-      try {
-        if (account.provider === 'GOOGLE') {
-          await this.calendarAccounts.renewWebhookIfNeeded(account.id);
-        } else {
-          await this.microsoftCalendarAccounts.renewWebhookIfNeeded(account.id);
+      for (const account of accounts) {
+        try {
+          if (account.provider === 'GOOGLE') {
+            await this.calendarAccounts.renewWebhookIfNeeded(account.id);
+          } else {
+            await this.microsoftCalendarAccounts.renewWebhookIfNeeded(account.id);
+          }
+        } catch (error) {
+          // One account's failed renewal (a real API error, a revoked token
+          // that hasn't surfaced as CalendarAccountStatus.ERROR yet, and so
+          // on) must never take down the sweep for everyone else, same
+          // "isolate the failure, keep going" principle checkReminders
+          // already applies above. Note: an account with BACKEND_PUBLIC_URL
+          // simply never configured doesn't land here at all — registerWebhook's
+          // own early return (see its own comment) makes that case a silent,
+          // non-throwing no-op, not a caught error; this sweep re-selects
+          // that account every single day for nothing until the operator
+          // configures the var, which is harmless but worth knowing if this
+          // job's own logs look suspiciously quiet for an otherwise-expected
+          // renewal.
+          this.logger.warn(`Calendar webhook renewal failed for account ${account.id} (${account.provider}): ${(error as Error).message}`);
         }
-      } catch (error) {
-        // One account's failed renewal (a real API error, a revoked token
-        // that hasn't surfaced as CalendarAccountStatus.ERROR yet, and so
-        // on) must never take down the sweep for everyone else, same
-        // "isolate the failure, keep going" principle checkReminders
-        // already applies above. Note: an account with BACKEND_PUBLIC_URL
-        // simply never configured doesn't land here at all — registerWebhook's
-        // own early return (see its own comment) makes that case a silent,
-        // non-throwing no-op, not a caught error; this sweep re-selects
-        // that account every single day for nothing until the operator
-        // configures the var, which is harmless but worth knowing if this
-        // job's own logs look suspiciously quiet for an otherwise-expected
-        // renewal.
-        this.logger.warn(`Calendar webhook renewal failed for account ${account.id} (${account.provider}): ${(error as Error).message}`);
       }
-    }
+    });
   }
 
   @Cron('*/15 * * * *')
   async checkReminders(): Promise<void> {
-    // Overlap guard — see this class's own comment on `checkRemindersRunning`.
-    if (this.checkRemindersRunning) {
-      this.logger.warn('checkReminders sweep skipped — the previous invocation is still running.');
-      return;
-    }
-    this.checkRemindersRunning = true;
-    try {
+    // Overlap guard — see this class's own comment above on why this is a
+    // real cross-instance lock, not an in-process boolean.
+    await withSchedulerLock(this.prisma, 'check-reminders', async () => {
       const users = await this.prisma.user.findMany({
         where: { deletedAt: null },
         select: {
@@ -254,9 +264,7 @@ export class SchedulerService {
           this.logger.warn(`Reminder check failed for user ${user.id}: ${(error as Error).message}`);
         }
       }
-    } finally {
-      this.checkRemindersRunning = false;
-    }
+    });
   }
 
   // Public (not private) specifically so this can be exercised directly for
