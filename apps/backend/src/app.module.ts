@@ -7,6 +7,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
+import depthLimit from 'graphql-depth-limit';
 import { resolveAuthContext } from './auth/resolve-auth-context';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -100,6 +101,17 @@ import { AuthGuard } from './auth/auth.guard';
         // so the schema and the resolver implementation can never drift apart.
         autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
         sortSchema: true,
+        // GraphQL complexity-protection increment (performance/scalability
+        // pass, 2026-08-28): rejects any query nested deeper than 10 levels
+        // before it ever reaches a resolver. 10 is deliberately generous —
+        // this schema's nested data mostly resolves eagerly via
+        // service-layer mappers rather than per-level lazy `@ResolveField`s,
+        // and the one self-referential type (Task.subtasks) only ever
+        // populates one level deep — while still blocking the genuinely
+        // pathological deeply-nested/aliased queries a public GraphQL
+        // endpoint is otherwise exposed to (the classic DoS vector this
+        // library exists to close).
+        validationRules: [depthLimit(10)],
         // Real-time chat streaming increment: a genuine graphql-ws
         // WebSocket server, bound onto this same HTTP server/port — not a
         // second process, not a hosted pub/sub service, the same
