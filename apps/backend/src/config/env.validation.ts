@@ -58,6 +58,18 @@ export const envSchema = z.object({
   // instead of the server refusing to boot.
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-sonnet-5'),
+  // Per-user AI spend cap (performance/scalability pass, 2026-08-28) — a
+  // plain optional string, not z.coerce.number(), on purpose: this file's
+  // own PAID_TIERS_ENABLED comment above documents how z.coerce's
+  // Boolean()-style coercion already produced one real silent-no-op
+  // production bug, and a malformed number is a similarly easy typo to
+  // make in an env var. AiUsageService.isOverBudget parses this itself and
+  // fails OPEN (treats the cap as unset, never blocks anyone) on anything
+  // that isn't a valid positive number — a misconfigured cap should never
+  // be able to lock out every user, only a correctly-configured one should
+  // ever block. Unset entirely (the default) means no cap at all, same as
+  // every other optional integration in this file.
+  AI_MONTHLY_COST_CAP_USD: z.string().optional(),
   // Real Stripe billing integration — same graceful-degradation pattern as
   // Google/Microsoft above, but with its own stricter "all four or none,
   // validated at boot" refine() below, since real money is enough at stake
