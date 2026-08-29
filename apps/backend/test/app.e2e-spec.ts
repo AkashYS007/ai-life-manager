@@ -446,7 +446,57 @@ describe('Tasks & Goals (e2e)', () => {
     expect(res.body.data.updateTask.errors[0].code).toBe('UPDATE_FAILED');
   });
 
-  // Tasks list/edit screen increment: both paths below (`goalId: null` to
+  // Production Hardening Sprint 1 (2026-08-29) regression coverage for the
+  // Update 50 IDOR fix (backend audit finding #4): createTask/updateTask
+  // used to write a client-supplied goalId/tagIds straight onto the task
+  // with no ownership check at all, and TASK_INCLUDE eagerly includes both
+  // `goal` and `tags` on every read — so a task pointed at another user's
+  // goal/tag id would come back on every future read carrying that other
+  // user's goal title (or tag name/color) embedded in it. Nothing in this
+  // suite exercised that specific fix before now, even though the cross-
+  // user tests immediately above cover a different ownership boundary
+  // (owning the task itself, not the goal/tag ids attached to it).
+  it("rejects creating a task linked to another user's goal, and does not create the task", async () => {
+    const otherEmail = `tasks-e2e-goal-owner-${Date.now()}@example.com`;
+    const otherGoal = await request(app.getHttpServer())
+      .post('/graphql')
+      .set('x-dev-user-email', otherEmail)
+      .send({ query: `mutation { createGoal(input: { title: "Someone else's goal" }) { goal { id } errors { code } } }` });
+    const otherGoalId = otherGoal.body.data.createGoal.goal.id;
+
+    const attempt = await gql(
+      `mutation { createTask(input: { title: "Hijack attempt", goalId: "${otherGoalId}" }) { task { id } errors { code message } } }`,
+    );
+    expect(attempt.body.data.createTask.task).toBeNull();
+    expect(attempt.body.data.createTask.errors[0].code).toBe('CREATE_FAILED');
+
+    const mine = await gql(`{ tasks(first: 50) { edges { node { title } } } }`);
+    expect(mine.body.data.tasks.edges.some((e: any) => e.node.title === 'Hijack attempt')).toBe(false);
+  });
+
+  it("rejects attaching another user's tag to a task via updateTask", async () => {
+    const otherEmail = `tasks-e2e-tag-owner-${Date.now()}@example.com`;
+    const otherTag = await request(app.getHttpServer())
+      .post('/graphql')
+      .set('x-dev-user-email', otherEmail)
+      .send({ query: `mutation { createTag(input: { name: "not-yours", color: "#111111" }) { tag { id } errors { code } } }` });
+    const otherTagId = otherTag.body.data.createTag.tag.id;
+
+    const mine = await gql(`mutation { createTask(input: { title: "My own task" }) { task { id } errors { code } } }`);
+    const myTaskId = mine.body.data.createTask.task.id;
+
+    const attempt = await gql(
+      `mutation { updateTask(id: "${myTaskId}", input: { tagIds: ["${otherTagId}"] }) { task { id tags { name } } errors { code message } } }`,
+    );
+    expect(attempt.body.data.updateTask.task).toBeNull();
+    expect(attempt.body.data.updateTask.errors[0].code).toBe('UPDATE_FAILED');
+
+    const reread = await gql(`{ tasks(first: 50) { edges { node { id tags { name } } } } }`);
+    const found = reread.body.data.tasks.edges.find((e: any) => e.node.id === myTaskId);
+    expect(found.node.tags).toEqual([]);
+  });
+
+// Tasks list/edit screen increment: both paths below (`goalId: null` to
   // unlink, `tagIds: []` to clear) have been supported by updateTask's
   // underlying Prisma call (see tasks.service.ts's `update`) since the very
   // first Tasks increment, but nothing had ever actually exercised either
