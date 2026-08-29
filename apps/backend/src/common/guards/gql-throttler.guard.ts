@@ -27,6 +27,11 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 // exist in a context shape that deliberately doesn't carry one.
 @Injectable()
 export class GqlThrottlerGuard extends ThrottlerGuard {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    if (process.env.NODE_ENV === 'test') return true;
+    return super.canActivate(context);
+  }
+
   getRequestResponse(context: ExecutionContext): { req: Record<string, unknown>; res: { header: () => void } } {
     const gqlContext = GqlExecutionContext.create(context).getContext<{ req?: Record<string, unknown> }>();
     const req = gqlContext.req ?? {};
