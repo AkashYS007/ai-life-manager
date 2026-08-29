@@ -4,6 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { PubSub } from 'graphql-subscriptions';
 import { AuthGuard } from '../auth/auth.guard';
 import { GqlThrottlerGuard } from '../common/guards/gql-throttler.guard';
+import { AiBudgetGuard } from '../common/guards/ai-budget.guard';
 import { CurrentAuth } from '../auth/current-auth.decorator';
 import { AuthContext } from '../auth/auth-context';
 import { UsersService } from '../users/users.service';
@@ -49,7 +50,7 @@ export class ChatResolver {
   // them, per chat.service.ts) with no other cap in the stack — 20/min per
   // client is generous for genuine back-and-forth conversation while still
   // bounding an unthrottled loop's worst case.
-  @UseGuards(GqlThrottlerGuard)
+  @UseGuards(GqlThrottlerGuard, AiBudgetGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Mutation(() => SendChatMessagePayload)
   async sendChatMessage(
@@ -98,7 +99,7 @@ export class ChatResolver {
   // `generateKey` keyed by user id instead of by handler — worth doing if
   // this ever needs tightening further, not required to close the actual
   // unbounded-cost risk the audit flagged.
-  @UseGuards(GqlThrottlerGuard)
+  @UseGuards(GqlThrottlerGuard, AiBudgetGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Mutation(() => SendChatMessagePayload)
   async sendChatMessageStreaming(
