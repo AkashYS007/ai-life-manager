@@ -71,9 +71,7 @@ import { AuthGuard } from './auth/auth.guard';
     // throttle the same way) is a much larger, riskier surface to get
     // right than gating the small number of endpoints that actually call
     // out to Anthropic.
-    ThrottlerModule.forRoot([
-      { name: 'default', ttl: 60_000, limit: process.env.NODE_ENV === 'test' ? 10_000 : 20 },
-    ]),
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 20 }]),
     // forRootAsync (not the plain forRoot every other increment's own
     // comments here used to describe) specifically so `onConnect` below can
     // inject the real ConfigService — needed to resolve AUTH_MODE/
