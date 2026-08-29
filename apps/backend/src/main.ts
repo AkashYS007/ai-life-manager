@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { initSentry, reportError } from './common/sentry';
@@ -58,8 +58,6 @@ async function bootstrap() {
     },
     credentials: true,
   });
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-
   const port = config.get<number>('PORT') ?? 4000;
   await app.listen(port);
   Logger.log(`AI Life Manager backend listening on :${port}`, 'Bootstrap');
