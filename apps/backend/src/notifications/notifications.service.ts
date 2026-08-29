@@ -1,8 +1,3 @@
-## 3. `apps/backend/src/notifications/notifications.service.ts` — select all, replace
-
-Passes the user's real `voiceNotificationsEnabled` preference down to native push.
-
-```typescript
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DateTime } from 'luxon';
@@ -412,6 +407,3 @@ export class NotificationsService {
     });
   }
 }
-```
-
----
