@@ -1,3 +1,8 @@
+## 3. `apps/backend/src/notifications/notifications.service.ts` — select all, replace
+
+Passes the user's real `voiceNotificationsEnabled` preference down to native push.
+
+```typescript
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DateTime } from 'luxon';
@@ -136,7 +141,20 @@ export class NotificationsService {
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
       const deliveries: Promise<void>[] = [
         this.webPushService.sendToUser(userId, payload),
-        this.nativePushService.sendToUser(userId, payload),
+        // Voice notification control (Production Hardening Sprint 1,
+        // 2026-08-29): the web/PWA path already reads voiceNotificationsEnabled
+        // client-side (VoiceNotifications.tsx, via apolloClient — see that
+        // component's own comment), but the native Android path
+        // (AiLifeManagerMessagingService) had no way to know this
+        // preference at all and spoke every reminder unconditionally —
+        // Update 60's own documented scope limit. Resolved here by
+        // resolving the decision server-side (the one place that already
+        // has the real `user` row) and carrying it down as a plain FCM
+        // data field, same pattern `deeplink` already uses. Defaults to
+        // `true` only when the column is somehow null (schema default is
+        // already `true` — see User.voiceNotificationsEnabled's own
+        // migration comment) so a pre-migration row can't silently go mute.
+        this.nativePushService.sendToUser(userId, { ...payload, voiceEnabled: user?.voiceNotificationsEnabled ?? true }),
       ];
       if (user?.emailNotificationsEnabled && user.email) {
         deliveries.push(this.emailService.send({ to: user.email, subject: payload.title, body: payload.body }));
@@ -394,3 +412,6 @@ export class NotificationsService {
     });
   }
 }
+```
+
+---
