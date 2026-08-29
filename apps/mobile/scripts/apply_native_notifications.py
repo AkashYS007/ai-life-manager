@@ -1,8 +1,3 @@
-## 4. `apps/mobile/scripts/apply_native_notifications.py` — select all, replace
-
-Native Android side: reads the new `voiceEnabled` FCM data field and skips text-to-speech when it's `"false"`.
-
-```python
 #!/usr/bin/env python3
 """Voice + reliable-banner notifications increment (2026-08-20). Run *after*
 `npx cap add android` and *before* `npx cap sync android`, same ordering and
@@ -296,6 +291,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-```
-
----
