@@ -1,3 +1,8 @@
+## 2. `apps/backend/src/push/native-push.service.ts` — select all, replace
+
+Adds the `voiceEnabled` field to the native FCM data payload so the app can honor the user's voice-notification preference.
+
+```typescript
 import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +12,17 @@ interface PushPayload {
   title: string;
   body: string;
   deeplink: string;
+  // Voice notification control (Production Hardening Sprint 1, 2026-08-29):
+  // AiLifeManagerMessagingService always spoke every reminder aloud with no
+  // way to turn it off natively — this is the fix. Optional and defaulted
+  // to "true" below (not `false`) so any caller that doesn't pass it
+  // (there are none left in this codebase, but a future one might) keeps
+  // today's existing always-on behavior rather than silently going mute.
+  // The actual on/off decision is still made server-side from the user's
+  // real `voiceNotificationsEnabled` column — this field only carries that
+  // already-resolved decision down to the native client, the same way
+  // `deeplink` carries an already-resolved, trusted server value.
+  voiceEnabled?: boolean;
 }
 
 // Native app shell increment (2026-08-20). See the schema comment on
@@ -117,7 +133,19 @@ export class NativePushService {
             () =>
               admin.messaging().send({
                 token: row.token,
-                data: { title: payload.title, body: payload.body, deeplink: payload.deeplink },
+                // FCM data payloads are string-only — booleans must be
+                // stringified; AiLifeManagerMessagingService parses this
+                // back with `"false".equals(...)` (fail-open: any value
+                // other than the literal string "false", including the
+                // field being entirely absent on an older/unrelated
+                // sender, keeps voice on, matching this field's own
+                // optional/defaulted-true contract above).
+                data: {
+                  title: payload.title,
+                  body: payload.body,
+                  deeplink: payload.deeplink,
+                  voiceEnabled: String(payload.voiceEnabled ?? true),
+                },
                 android: { priority: 'high' },
               }),
             {
@@ -143,3 +171,6 @@ export class NativePushService {
     );
   }
 }
+```
+
+---
