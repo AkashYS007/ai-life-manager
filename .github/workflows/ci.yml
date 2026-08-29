@@ -100,6 +100,8 @@ jobs:
           # keeps this path open exactly as it already is for local dev.
           AUTH_MODE: 'dev'
           NODE_ENV: 'test'
+                              # Ephemeral CI-only passphrase for calendar token encryption tests.
+                              TOKEN_ENCRYPTION_KEY: 'ci-only-calendar-token-key'
 
   web:
     name: Web (build, lint)
