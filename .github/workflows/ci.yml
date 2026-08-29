@@ -1,3 +1,8 @@
+## 1. `.github/workflows/ci.yml` — select all, replace
+
+Adds a real Postgres service container and wires the pre-existing e2e suite into CI for the first time.
+
+```yaml
 name: CI
 
 # Deployment maturity pass (2026-08-27): the missing backend/web CI gate,
@@ -6,9 +11,14 @@ name: CI
 # on every push and pull request targeting `main` so a broken build/lint/test
 # is caught before it lands, not after Railway/Vercel already deployed it.
 #
-# Scope, deliberately: build + lint + unit test for both apps. The e2e suite
-# (test/app.e2e-spec.ts) needs a live Postgres and isn't wired in here yet —
-# see README's own "Still untested" section for that follow-up.
+# Scope: build + lint + unit test for both apps, plus (Production Hardening
+# Sprint 1, 2026-08-29) the backend's real e2e suite (test/app.e2e-spec.ts)
+# against a real Postgres service container — closing the gap this same
+# comment used to document as still open. That suite is fully self-contained
+# (AnthropicClient and every other real external integration is either
+# mocked or exercises its own graceful *_NOT_CONFIGURED path — see the
+# suite's own comments), so a real database is the only infrastructure it
+# ever needed; nothing else was blocking this.
 
 on:
   push:
@@ -36,6 +46,24 @@ jobs:
     defaults:
       run:
         working-directory: apps/backend
+    # Real Postgres for the e2e suite below — a plain, ephemeral,
+    # single-run container (GitHub's own Docker daemon on ubuntu-latest
+    # runs it natively, no separate setup step needed), never reused across
+    # runs and never reachable from outside this job.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ailm_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +87,24 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ailm_ci'
+
+      - name: E2E tests
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ailm_ci'
+          # The same dev-auth bypass local development already uses (see
+          # auth.guard.ts's own comment) — lets the suite authenticate as
+          # many distinct throwaway identities via a plain header instead of
+          # needing a real Clerk project. env.validation.ts only refuses
+          # AUTH_MODE=dev when NODE_ENV=production, so NODE_ENV=test below
+          # keeps this path open exactly as it already is for local dev.
+          AUTH_MODE: 'dev'
+          NODE_ENV: 'test'
 
   web:
     name: Web (build, lint)
@@ -98,3 +144,6 @@ jobs:
         # backend this CI job doesn't stand up. See README's own
         # "Still untested" section.
         run: npm run build
+```
+
+---
