@@ -17,6 +17,7 @@ import { NotificationsService } from '../src/notifications/notifications.service
 import { StripeService } from '../src/billing/stripe.service';
 import Stripe from 'stripe';
 import { signOAuthState } from '../src/integrations/oauth-state';
+import { encryptToken } from '../src/integrations/crypto/token-cipher';
 
 // Runs against a real Postgres instance (docker-compose) using the AUTH_MODE=dev
 // bypass documented in auth/auth.guard.ts — the same pattern a real team uses
@@ -3098,12 +3099,25 @@ describe('Microsoft calendar sync — pulling events (e2e)', () => {
     const me = await gql('{ me { id } }');
     userId = me.body.data.me.id;
 
+    // microsoft-calendar-accounts.service.ts's real sync() genuinely
+    // decrypts these two columns (decryptToken(account.accessTokenEncrypted,
+    // this.encryptionKey)) before ever calling the mocked
+    // MicrosoftCalendarClient above — unlike the "deleting a synced event"
+    // describe block below (and the Google two-way-sync block earlier),
+    // which mock at the higher *WriteService level and so never actually
+    // decrypt anything. A plain Buffer.from(...) here isn't valid
+    // ciphertext, so decryptToken throws and every test below fails
+    // closed with a generic SYNC_FAILED regardless of whether
+    // TOKEN_ENCRYPTION_KEY itself is even correct. Real encryptToken with
+    // the same TOKEN_ENCRYPTION_KEY the running server actually uses
+    // closes that gap.
+    const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY!;
     const account = await prisma.calendarAccount.create({
       data: {
         userId,
         provider: 'MICROSOFT',
-        accessTokenEncrypted: Buffer.from('fake-access-token'),
-        refreshTokenEncrypted: Buffer.from('fake-refresh-token'),
+        accessTokenEncrypted: encryptToken('fake-access-token', encryptionKey),
+        refreshTokenEncrypted: encryptToken('fake-refresh-token', encryptionKey),
       },
     });
     accountId = account.id;
@@ -7200,10 +7214,16 @@ describe('Life analytics (e2e)', () => {
     // this test — a real, non-monotonic-but-strong relationship between how
     // many minutes were focused a given day and how many journal entries
     // got written that same day (both plausible on a genuinely productive
-    // vs. genuinely quiet day).
-    const daysAgoValues = [5, 4, 3, 2, 1, 0];
-    const focusMinutesByDay = [0, 20, 45, 60, 90, 30];
-    const journalEntriesByDay = [0, 1, 1, 2, 3, 1];
+    // vs. genuinely quiet day). 7 days, not 6: analytics.service.ts clamps
+    // any requested window to a hard MIN_WINDOW_DAYS of 7 (see the
+    // "clamps an out-of-range days argument" test above), so a `days: 6`
+    // request silently becomes a real 7-day window server-side regardless
+    // — this dataset has to cover all 7 of those days, or the 7th
+    // (real, but un-scripted) day would come back with its own genuine
+    // 0/0 point and skew both sampleSize and the coefficient below.
+    const daysAgoValues = [6, 5, 4, 3, 2, 1, 0];
+    const focusMinutesByDay = [5, 0, 20, 45, 60, 90, 30];
+    const journalEntriesByDay = [0, 0, 1, 1, 2, 3, 1];
 
     for (let i = 0; i < daysAgoValues.length; i++) {
       const date = daysAgo(daysAgoValues[i]);
@@ -7211,16 +7231,8 @@ describe('Life analytics (e2e)', () => {
       await addJournalEntriesOnDay(journalEntriesByDay[i], date);
     }
 
-    // Deliberately days: 6, not the 7 every other correlation test in this
-    // file uses — this test's own dataset above only ever scripts 6 days
-    // (daysAgoValues 5..0), and analyticsSummary counts every day in its
-    // window as a real sample (even a legitimate 0/0 day, per this same
-    // assertion's own comment below) — a 7-day window would silently pull
-    // in one more, real, un-scripted day and inflate sampleSize past the
-    // exact 6-point dataset the coefficient below was independently
-    // verified against.
     const res = await gql(
-      `{ analyticsSummary(days: 6) { correlations { metricALabel metricBLabel lagDays coefficient sampleSize description } } }`,
+      `{ analyticsSummary(days: 7) { correlations { metricALabel metricBLabel lagDays coefficient sampleSize description } } }`,
     );
     const correlations = res.body.data.analyticsSummary.correlations;
 
@@ -7228,8 +7240,8 @@ describe('Life analytics (e2e)', () => {
       (c: any) => c.metricALabel === 'Focused minutes' && c.metricBLabel === 'Journal entries' && c.lagDays === 0,
     );
     expect(focusVsJournal).toBeDefined();
-    expect(focusVsJournal.sampleSize).toBe(6); // every day has a real completedMinutes/entryCount, even the 0s — none excluded
-    expect(focusVsJournal.coefficient).toBe(0.97); // independently verified via numpy.corrcoef before writing this assertion
+    expect(focusVsJournal.sampleSize).toBe(7); // every day has a real completedMinutes/entryCount, even the 0s — none excluded
+    expect(focusVsJournal.coefficient).toBe(0.97); // independently verified via numpy.corrcoef before writing this assertion (still 0.97 with the added 7th day)
     expect(focusVsJournal.description).toContain('higher journal entries');
 
     // Neither Mood nor Energy was ever logged this test — confirms this
