@@ -69,12 +69,20 @@ export class BillingService {
         const userId = session.metadata?.userId;
         const subscriptionId =
           typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
-        const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
-        if (!userId || !subscriptionId || !customerId) {
-          this.logger.warn(`checkout.session.completed missing userId/subscription/customer (session ${session.id})`);
+        if (!userId || !subscriptionId) {
+          this.logger.warn(`checkout.session.completed missing userId/subscription (session ${session.id})`);
           return;
         }
-        await this.syncSubscriptionFromStripe(userId, subscriptionId, customerId);
+        // Deliberately NOT reading customerId off the session here (a
+        // previous version of this handler did) — this file's own comment
+        // above already establishes "never trust the Checkout Session's
+        // own immediate return value," and that has to apply to every
+        // field pulled from it, not just tier/status/currentPeriodEnd.
+        // syncSubscriptionFromStripe below re-derives customerId from the
+        // real, freshly-retrieved Stripe.Subscription object instead, the
+        // same authoritative source everything else in this method
+        // already uses.
+        await this.syncSubscriptionFromStripe(userId, subscriptionId);
         return;
       }
 
@@ -106,8 +114,9 @@ export class BillingService {
     }
   }
 
-  private async syncSubscriptionFromStripe(userId: string, subscriptionId: string, customerId: string): Promise<void> {
+  private async syncSubscriptionFromStripe(userId: string, subscriptionId: string): Promise<void> {
     const subscription = await this.stripeService.retrieveSubscription(subscriptionId);
+    const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id;
     await this.applySubscriptionState(userId, customerId, subscription);
   }
 
