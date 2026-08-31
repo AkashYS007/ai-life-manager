@@ -100,6 +100,28 @@ jobs:
           # keeps this path open exactly as it already is for local dev.
           AUTH_MODE: 'dev'
           NODE_ENV: 'test'
+          # Ephemeral CI-only passphrase for the Microsoft/Apple calendar
+          # token-encryption path (see token-cipher.ts) — those two
+          # integrations' services all pull this via
+          # config.get('TOKEN_ENCRYPTION_KEY')! with no fallback, so
+          # without it every real connect/sync call in this suite fails
+          # closed with a generic CONNECT_FAILED/SYNC_FAILED rather than
+          # succeeding. A previous attempt to add this line used the wrong
+          # indentation (nested it outside the `env:` map instead of
+          # alongside AUTH_MODE/NODE_ENV above), which is why it was
+          # reverted rather than left in — same key, correct indentation
+          # this time.
+          TOKEN_ENCRYPTION_KEY: 'ci-only-calendar-token-key'
+          # web-push.service.ts's vapidPublicKey resolver returns
+          # `process.env.VAPID_PUBLIC_KEY ?? null` — with no value set at
+          # all, that's a legitimate `null`, but the e2e test round-trips
+          # this against `process.env.VAPID_PUBLIC_KEY` read from inside
+          # the same Jest process, which is `undefined` (not `null`) when
+          # unset — so the test fails on a type mismatch alone even though
+          # nothing is actually broken. A fixed CI-only value here makes
+          # both sides agree on a real, defined string, the same fix
+          # shape as TOKEN_ENCRYPTION_KEY above.
+          VAPID_PUBLIC_KEY: 'ci-only-test-vapid-public-key'
 
   web:
     name: Web (build, lint)
