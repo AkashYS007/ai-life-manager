@@ -5937,6 +5937,28 @@ describe('Scheduler / reminder sweep (e2e)', () => {
     const res = await gql(`{ notifications { type } }`);
     return res.body.data.notifications.map((n: any) => n.type);
   }
+  // Production Hardening Sprint 1 (2026-08-31) CI-failure fix. The two
+  // custom-habit-overdue-window tests below check checkRemindersForUser at
+  // local time 9:30 as their first step — and 9:30 always lands exactly on
+  // a WATER_REMINDER_INTERVAL_MINUTES (30-minute) boundary, so
+  // scheduler.service.ts's always-on, unconditional water-reminder side
+  // effect (no per-user toggle exists for it) fires a genuine
+  // `water_reminder:...` notification alongside whatever the test is
+  // actually trying to observe. That's correct product behavior, not a
+  // bug — these two tests just weren't written to expect it, so their
+  // exact-array `toEqual` assertions failed the very first time this
+  // suite ran against a real database in CI (previously untested, since
+  // nothing wired this suite into CI before this same Sprint). Every
+  // other assertion in this file that only needs to prove a *specific*
+  // type is/isn't present already uses `toContain`/`not.toContain`/a
+  // filtered `.filter(t => t === ...)` count, all of which are already
+  // immune to this ambient noise — only the handful of exact-list
+  // comparisons below need this filtered variant.
+  async function notificationTypesExcludingAmbientReminders(gql: (q: string) => any): Promise<string[]> {
+    const types = await notificationTypes(gql);
+    return types.filter((t) => !t.startsWith('water_reminder:') && !t.startsWith('break_reminder:'));
+  }
+
 
   it('morning routine reminder fires when incomplete inside the 8:00-8:30 window, and stops firing once complete', async () => {
     const { gql } = freshUser();
@@ -6001,7 +6023,7 @@ describe('Scheduler / reminder sweep (e2e)', () => {
 
     // Only 5 minutes overdue — below the 15-minute floor, nothing fires.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(9, 5));
-    expect(await notificationTypes(gql)).toEqual([]);
+    expect(await notificationTypesExcludingAmbientReminders(gql)).toEqual([]);
 
     // 30 minutes overdue — within range, both independently overdue habits
     // each get their own tracked notification rather than colliding into one.
@@ -6044,7 +6066,7 @@ describe('Scheduler / reminder sweep (e2e)', () => {
     // The old fixed default hour (8am) no longer does anything for this
     // user — still incomplete, but outside the new 6:00-6:30 window now.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(8, 10));
-    expect(await notificationTypes(gql)).toEqual([]);
+    expect(await notificationTypesExcludingAmbientReminders(gql)).toEqual([]);
 
     // The real custom hour (6am) does fire.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(6, 10));
@@ -6066,7 +6088,7 @@ describe('Scheduler / reminder sweep (e2e)', () => {
     // new custom 60-minute floor. Would have fired under the old default;
     // must not fire now.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(9, 30));
-    expect(await notificationTypes(gql)).toEqual([]);
+    expect(await notificationTypesExcludingAmbientReminders(gql)).toEqual([]);
 
     // 75 minutes overdue — inside the new custom 60-90 window.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(10, 15));
@@ -6110,12 +6132,12 @@ describe('Scheduler / reminder sweep (e2e)', () => {
 
     // 30 minutes overdue — inside the base window, base reminder fires.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(9, 30));
-    expect(await notificationTypes(gql)).toEqual([`habit_reminder:${habitId}`]);
+    expect(await notificationTypesExcludingAmbientReminders(gql)).toEqual([`habit_reminder:${habitId}`]);
 
     // 150 minutes overdue — past the base ceiling (120) but nowhere near
     // the escalation threshold (360) yet. The known dead zone: nothing new.
     await schedulerService.checkRemindersForUser(userId, timezoneForLocalTime(11, 30));
-    expect(await notificationTypes(gql)).toEqual([`habit_reminder:${habitId}`]);
+    expect(await notificationTypesExcludingAmbientReminders(gql)).toEqual([`habit_reminder:${habitId}`]);
 
     // 400 minutes overdue (past the 360-minute threshold), original
     // reminder still unread — the escalation fires, as a distinct type
