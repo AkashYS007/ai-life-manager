@@ -2636,7 +2636,12 @@ describe('Chat tool-calling (e2e)', () => {
     const { chunks, mutationResult } = await sendAndCollect('Mark the thing as done');
     expect(mutationResult.errors).toEqual([]);
     const toolChunk = chunks.find((c) => c.role === 'TOOL')!;
-    expect(toolChunk.delta.toLowerCase()).toContain("couldn't find");
+    // chat.service.ts's real NotFoundException-mapped message is "Could     
+    // not find that task — ..." (no contraction) — this test's own     
+    // expected substring was just written with the wrong wording, not a     
+    // real product-message change; matching the current, more descriptive     
+    // real string here instead of the other way around.     
+    expect(toolChunk.delta.toLowerCase()).toContain('could not find');
   });
 
   it('reschedule_task: refuses to double-book a fixed calendar event, and leaves the task genuinely untouched', async () => {
@@ -4109,7 +4114,18 @@ describe('Journal sentiment analysis (e2e)', () => {
 
     const res = await gql(`mutation { createJournalEntry(input: { content: "Had a genuinely great day." }) { entry { id sentimentScore } errors { code } } }`);
     expect(res.body.data.createJournalEntry.errors).toEqual([]);
-    expect(res.body.data.createJournalEntry.entry.sentimentScore).toBeCloseTo(0.6);
+    // journal.service.ts's create() deliberately does NOT await scoring     
+    // (see its own long comment on why — a real Anthropic call must never     
+    // block the save the person is waiting on), so the *immediate*     
+    // mutation response's sentimentScore is always still null; this same     
+    // suite's other tests below already rely on exactly this by doing a     
+    // second, later gql() call before ever checking the score-driven     
+    // effect. A plain re-read after the fact is that same pattern applied     
+    // directly to this one field, instead of the immediate response.     
+    const entryId = res.body.data.createJournalEntry.entry.id;     
+    const reread = await gql(`{ journalEntries { edges { node { id sentimentScore } } } }`);     
+    const found = reread.body.data.journalEntries.edges.find((e: any) => e.node.id === entryId);     
+    expect(found.node.sentimentScore).toBeCloseTo(0.6);
   });
 
   it('a failed sentiment-scoring call leaves sentimentScore null without failing entry creation', async () => {
@@ -6649,9 +6665,15 @@ describe('Life analytics (e2e)', () => {
     // createHabit always stamps createdAt = now() server-side, with no way
     // to override it through the GraphQL API — backdating it directly is
     // the only way to test a real multi-day streak/window rather than a
-    // trivial one-day one.
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-    await prisma.habit.update({ where: { id: habitId }, data: { createdAt: threeDaysAgo } });
+    // trivial one-day one. analytics.service.ts's own due-day walk treats
+    // the creation day itself as due (`if (d < createdLocal) continue`,
+    // strictly-less-than — the equal day falls through and counts), so
+    // backdating by 2 days makes exactly 3 calendar days due (today,
+    // yesterday, two days ago) — this test's own line below was previously
+    // backdating by 3 days, which made the creation day itself land one
+    // calendar day earlier than intended and pulled in a real 4th due day.
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await prisma.habit.update({ where: { id: habitId }, data: { createdAt: twoDaysAgo } });
 
     const now = new Date();
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -7189,8 +7211,16 @@ describe('Life analytics (e2e)', () => {
       await addJournalEntriesOnDay(journalEntriesByDay[i], date);
     }
 
+    // Deliberately days: 6, not the 7 every other correlation test in this
+    // file uses — this test's own dataset above only ever scripts 6 days
+    // (daysAgoValues 5..0), and analyticsSummary counts every day in its
+    // window as a real sample (even a legitimate 0/0 day, per this same
+    // assertion's own comment below) — a 7-day window would silently pull
+    // in one more, real, un-scripted day and inflate sampleSize past the
+    // exact 6-point dataset the coefficient below was independently
+    // verified against.
     const res = await gql(
-      `{ analyticsSummary(days: 7) { correlations { metricALabel metricBLabel lagDays coefficient sampleSize description } } }`,
+      `{ analyticsSummary(days: 6) { correlations { metricALabel metricBLabel lagDays coefficient sampleSize description } } }`,
     );
     const correlations = res.body.data.analyticsSummary.correlations;
 
