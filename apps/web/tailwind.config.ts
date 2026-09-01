@@ -56,6 +56,16 @@ const config: Config = {
         // diffs) — #F87171 clears 4.5:1 against both dark backgrounds with
         // real margin (7.09:1 / 6.55:1).
         danger: { DEFAULT: '#DC2626', dark: '#F87171' },
+        // Sleek/futuristic visual redesign (2026-09-01): a second accent
+        // used for glow accents and gradients — Nova (the AI-assistant
+        // avatar, see NovaAvatar.tsx), the Today greeting's gradient
+        // headline, and the AI plan card's CTA glow. Kept separate from
+        // `accent`/`ai-accent` (both already carefully contrast-tuned above)
+        // rather than reusing or mutating either — this token is only ever
+        // used decoratively (glows, gradient stops), never for body text, so
+        // it doesn't carry the same WCAG text-contrast obligation the others
+        // do.
+        nova: { DEFAULT: '#0E9488', dark: '#5FE1DB' },
       },
       borderRadius: {
         control: '8px',
@@ -64,6 +74,11 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-inter)', 'sans-serif'],
+        // Sleek/futuristic visual redesign: a distinct display face for
+        // headline moments only (Today's greeting) — body copy everywhere
+        // else stays on the existing `sans` (Inter) so this is additive,
+        // not a font swap across the app.
+        display: ['var(--font-display)', 'sans-serif'],
       },
       transitionDuration: {
         micro: '120ms',
