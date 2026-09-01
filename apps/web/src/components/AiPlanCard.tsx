@@ -4,6 +4,11 @@ import { useState } from 'react';
 import { useMutation } from '@apollo/client';
 import { REQUEST_REPLAN, RESPOND_TO_PLAN_RUN, TODAY_PLAN_QUERY, UPDATE_TASK } from '../lib/queries';
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../lib/datetime-local';
+// Sleek/futuristic visual redesign (2026-09-01): Nova appears here, in the
+// plan card's steady state, as the small "assistant is present" cue next to
+// the status copy — see NovaAvatar.tsx for why it's a hand-rolled CSS glow
+// rather than an image asset.
+import { NovaAvatar } from './NovaAvatar';
 
 interface PlanChange {
   id: string;
@@ -578,8 +583,14 @@ export function AiPlanCard({
           )}
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
+        <div className="flex items-center gap-3">
+          {/* Sleek/futuristic visual redesign (2026-09-01): Nova stands in
+              for "the assistant is here, ready when you are" — steady-state
+              only, not shown in the pending-proposal branch above, since
+              that state already has the diff/accept/reject UI doing the
+              talking. */}
+          <NovaAvatar size={34} />
+          <p className="flex-1 text-sm text-text-secondary dark:text-text-secondary-dark">
             {latestPlanRun?.status === 'ACCEPTED'
               ? 'Your last plan was applied. Ask again anytime your day changes.'
               : latestPlanRun?.status === 'EDITED'
