@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Space_Grotesk } from 'next/font/google';
 import { InstallPromptBanner } from '../components/InstallPromptBanner';
 import { Providers } from '../components/Providers';
 import { PwaRegister } from '../components/PwaRegister';
@@ -7,6 +7,15 @@ import { VoiceNotifications } from '../components/VoiceNotifications';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+// Sleek/futuristic visual redesign (2026-09-01): a distinct display face for
+// headline moments (Today's greeting) — see tailwind.config.ts's `display`
+// font token. Loaded alongside Inter, not instead of it; body copy is
+// untouched.
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  variable: '--font-display',
+});
 
 // PWA + offline support increment (PRD §10's platform requirement — "PWA on
 // web" is part of the MVP definition itself, not a later polish pass): the
@@ -37,12 +46,26 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#4C4CFF',
+  // Sleek/futuristic visual redesign: matches the new default dark
+  // background (`background.dark` in tailwind.config.ts) so the mobile
+  // status bar / PWA splash screen reads as one continuous surface with the
+  // app itself, instead of the old light-mode accent color flashing behind
+  // a now-dark app shell.
+  themeColor: '#0B0B12',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
+    // `dark` is applied unconditionally here: the sleek/futuristic redesign
+    // (2026-09-01) makes dark the app's one default look rather than an
+    // opt-in toggle. Every component already carries `dark:` variants (see
+    // tailwind.config.ts's `darkMode: 'class'` and the accessibility pass
+    // that gave every semantic color a real dark value) — that theme was
+    // fully built but never actually activated anywhere before this, since
+    // nothing in the app ever added the `dark` class. A real light/dark
+    // toggle is a reasonable future follow-up; this is a deliberate,
+    // minimal way to turn the existing, already-correct dark theme on.
+    <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable} dark`}>
       <body>
         {/* Registers the service worker (see public/sw.js) — mounted once,
             app-wide, same "invisible, no UI of its own" pattern TimezoneSync
