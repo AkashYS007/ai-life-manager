@@ -54,7 +54,13 @@ export function TodayHeader({
     <div className="flex items-start justify-between gap-3 px-5 pt-6 pb-3">
       <div>
         <p className="text-sm text-text-secondary dark:text-text-secondary-dark">{today}</p>
-        <h1 className="mt-0.5 text-2xl font-medium text-text-primary dark:text-text-primary-dark">
+        {/* Sleek/futuristic visual redesign (2026-09-01): the greeting is
+            Today's single biggest headline moment, so it gets the new
+            `display` face plus a dark-mode-only gradient treatment (white →
+            `nova.dark`) rather than a flat text color — light mode is left
+            exactly as it was, since the gradient is tuned against the dark
+            background only. */}
+        <h1 className="mt-0.5 text-2xl font-medium font-display text-text-primary dark:bg-gradient-to-r dark:from-white dark:to-nova-dark dark:bg-clip-text dark:text-transparent">
           {greeting}, {name}
         </h1>
       </div>
