@@ -62,6 +62,20 @@ jobs:
       - name: Scaffold native Android project
         run: npx cap add android
 
+      # Play Store submission readiness pass (2026-09-01) — see
+      # scripts/apply_version.py's own module docstring for the full story:
+      # without this, every build ever produced left Capacitor's scaffolded
+      # `versionCode 1` in place forever, which Google Play accepts for a
+      # first upload but rejects for every update after it (Play requires a
+      # strictly increasing versionCode on each new upload). Runs
+      # unconditionally (not gated behind the release-signing secrets below)
+      # so the debug and release builds always carry the same real
+      # versionCode/versionName, and must run before `cap sync android` so
+      # the sync doesn't clobber it — same ordering as every other apply_*.py
+      # step in this job.
+      - name: Apply CI-driven build version (versionCode/versionName)
+        run: python3 scripts/apply_version.py
+
       - name: Apply real app icons
         run: |
           pip install --quiet Pillow
@@ -158,4 +172,24 @@ jobs:
         with:
           name: ai-life-manager-release-apk
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      # Play Store submission readiness pass (2026-09-01): Google Play has
+      # required an Android App Bundle (.aab), not a plain APK, for every new
+      # app submission since 2021 — the signed release APK built above is
+      # still produced (useful for sideloading/manual testing) but on its own
+      # can't even be uploaded to Play Console for a first listing. Same
+      # signing-secrets gate as the release APK above, since an AAB destined
+      # for Play Console has to be signed the same way.
+      - name: Build signed release Android App Bundle (AAB)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        working-directory: apps/mobile/android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Upload signed release AAB artifact
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-life-manager-release-aab
+          path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
