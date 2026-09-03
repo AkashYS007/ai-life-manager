@@ -122,6 +122,19 @@ jobs:
       - name: Apply native notifications (voice + banner)
         run: python3 scripts/apply_native_notifications.py
 
+      # Wake-up alarm increment follow-up (2026-09-03) — see
+      # scripts/apply_alarm_permission.py's own module docstring for the
+      # full story: a real Pixel running this app hit a live
+      # SecurityException ("Permission Denial ... requires
+      # com.android.alarm.permission.SET_ALARM") the moment it tried to hand
+      # a wake-up time off to Google's own stock Clock app —
+      # @capgo/capacitor-alarm's own bundled manifest declares no
+      # permissions at all, so this is on the calling app. Same
+      # "re-apply on every fresh scaffold" reasoning as every other
+      # apply_*.py step in this job.
+      - name: Apply alarm permission
+        run: python3 scripts/apply_alarm_permission.py
+
       # Release-signing increment (2026-08-28) — see
       # scripts/apply_release_signing.py's own module docstring for the full
       # story: no-ops entirely (build.gradle untouched) unless all four
