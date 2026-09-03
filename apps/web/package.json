@@ -12,6 +12,7 @@
     "@apollo/client": "^3.11.8",
     "@capacitor/core": "^8.5.0",
     "@capacitor/push-notifications": "^8.0.0",
+    "@capgo/capacitor-alarm": "^8.1.8",
     "@clerk/nextjs": "^6.39.6",
     "@sentry/browser": "^8.55.2",
     "apollo3-cache-persist": "^0.15.0",

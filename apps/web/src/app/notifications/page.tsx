@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import Link from 'next/link';
+import { Capacitor } from '@capacitor/core';
+import { CapgoAlarm } from '@capgo/capacitor-alarm';
 import {
   MARK_NOTIFICATION_READ,
   NOTIFICATIONS_QUERY,
@@ -85,6 +87,44 @@ function NotificationRowView({ notification }: { notification: NotificationRow }
 // call and comes back as a less helpful server-thrown error.
 const PHONE_LOOKS_VALID = /^\+[1-9]\d{1,14}$/;
 
+// Wake-up alarm increment (2026-09-02). Deliberately hands off to the
+// phone's own OS Clock app via @capgo/capacitor-alarm rather than this app
+// building/ringing its own alarm — see this file's own comment above the
+// "Wake up" section below for the full reasoning (the short version: this
+// is the only way to get a real, silent-mode-bypassing, full-screen ring on
+// a phone that this app doesn't have to build and maintain itself).
+// `Capacitor.isNativePlatform()` is false in any normal browser tab/PWA —
+// same guard NativePushRegistration.tsx already uses — so this is a no-op
+// there, not an error.
+async function syncPhoneAlarm(timeValue: string): Promise<string> {
+  if (!Capacitor.isNativePlatform()) {
+    return "Wake-up alarms only work from the AI Life Manager mobile app — not in a browser tab, since only the native app can ask your phone's Clock app to set one.";
+  }
+  const [hourStr, minuteStr] = timeValue.split(':');
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return "That wake-up time didn't look valid, so nothing was sent to your phone.";
+  }
+  try {
+    const result = await CapgoAlarm.createAlarm({
+      hour,
+      minute,
+      label: 'Wake up',
+      // Ask the Clock app to add this silently rather than opening its own
+      // "confirm alarm" screen — not guaranteed on every phone/OEM Clock
+      // app (see the plugin's own docs), so the status message below stays
+      // honest about that rather than promising it always works silently.
+      skipUi: true,
+      vibrate: true,
+    });
+    if (result.success) return "Sent to your phone's Clock app.";
+    return result.message ?? "Your phone's Clock app didn't confirm the alarm was set — check the Clock app directly.";
+  } catch {
+    return "Couldn't reach your phone's Clock app. You may need to add the alarm there yourself this time.";
+  }
+}
+
 function PreferencesForm() {
   // Fix (frontend consistency pass, 2026-08-25): same gap as SETTINGS_QUERY
   // on settings/page.tsx (see that file's own comment for the full
@@ -97,6 +137,20 @@ function PreferencesForm() {
   const { data, loading, error: queryError, refetch: refetchPreferences } = useQuery(NOTIFICATION_PREFERENCES_QUERY);
   const [quietHoursStart, setQuietHoursStart] = useState('');
   const [quietHoursEnd, setQuietHoursEnd] = useState('');
+  // Wake-up alarm increment (2026-09-02). Kept separate from
+  // quietHoursStart/End's own state — see schema.prisma's comment on
+  // User.wakeUpTime for why this is a distinct preference. `savedWakeUpTime`
+  // tracks the last value actually confirmed by the server, so handleSave
+  // can tell "the wake-up time itself changed this save" apart from
+  // "some other preference changed but wake-up time didn't" — only the
+  // former should ask the phone's Clock app to add a new alarm, since
+  // Android can't update/replace one this app already sent it (see
+  // syncPhoneAlarm's own comment), so re-sending an unchanged time on every
+  // save would just pile up duplicate alarms.
+  const [wakeUpTime, setWakeUpTime] = useState('');
+  const [savedWakeUpTime, setSavedWakeUpTime] = useState('');
+  const [alarmStatus, setAlarmStatus] = useState<string | null>(null);
+  const [syncingAlarm, setSyncingAlarm] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [smsEnabled, setSmsEnabled] = useState(false);
@@ -123,6 +177,8 @@ function PreferencesForm() {
     if (dirty || !data?.me) return;
     setQuietHoursStart(data.me.quietHoursStart ?? '');
     setQuietHoursEnd(data.me.quietHoursEnd ?? '');
+    setWakeUpTime(data.me.wakeUpTime ?? '');
+    setSavedWakeUpTime(data.me.wakeUpTime ?? '');
     setPushEnabled(data.me.pushNotificationsEnabled);
     setEmailEnabled(data.me.emailNotificationsEnabled);
     setSmsEnabled(data.me.smsNotificationsEnabled);
@@ -150,6 +206,7 @@ function PreferencesForm() {
           input: {
             quietHoursStart: quietHoursStart || null,
             quietHoursEnd: quietHoursEnd || null,
+            wakeUpTime: wakeUpTime || null,
             pushNotificationsEnabled: pushEnabled,
             emailNotificationsEnabled: emailEnabled,
             smsNotificationsEnabled: smsEnabled,
@@ -167,6 +224,16 @@ function PreferencesForm() {
       // The refetch this mutation triggers reflects exactly what was just
       // saved — safe to let the sync effect above apply it once it lands.
       setDirty(false);
+      // Wake-up alarm increment: only ask the phone's Clock app to add an
+      // alarm when the wake-up time itself actually changed this save — see
+      // savedWakeUpTime's own comment above for why an unrelated preference
+      // change (e.g. toggling email notifications) shouldn't re-trigger it.
+      if (wakeUpTime && wakeUpTime !== savedWakeUpTime) {
+        setSyncingAlarm(true);
+        setAlarmStatus(await syncPhoneAlarm(wakeUpTime));
+        setSyncingAlarm(false);
+        setSavedWakeUpTime(wakeUpTime);
+      }
     } catch {
       // A malformed phone number that slipped past the loose client-side
       // check above still gets caught server-side (UpdateNotificationPreferencesInput's
@@ -192,6 +259,50 @@ function PreferencesForm() {
   return (
     <div className="mx-4 mb-4 rounded-card border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
       <h2 className="mb-3 text-sm font-medium text-text-primary dark:text-text-primary-dark">Preferences</h2>
+
+      {/* Wake-up alarm increment (2026-09-02). Deliberately a separate
+          field from Quiet hours below, not a relabeling of quietHoursEnd —
+          see schema.prisma's comment on User.wakeUpTime. This doesn't ring
+          anything by itself: saving a time here asks the mobile app to hand
+          the alarm off to the phone's own Clock app (a real OS alarm — loud,
+          bypasses silent mode, full-screen), since neither this backend nor
+          a browser tab can ring an alarm like that. Only shows real effect
+          inside the native app; on the web it still saves the preference
+          (so it's ready the next time you open the app) but says so. */}
+      <div className="mb-4">
+        <label className="mb-1 block text-xs text-text-secondary dark:text-text-secondary-dark">
+          Wake up at
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="time"
+            value={wakeUpTime}
+            onChange={(e) => { setDirty(true); setAlarmStatus(null); setWakeUpTime(e.target.value); }}
+            aria-label="Wake up time"
+            className="rounded-control border border-border dark:border-border-dark bg-background dark:bg-background-dark px-2 py-1 text-sm text-text-primary dark:text-text-primary-dark"
+          />
+          <button
+            type="button"
+            disabled={!wakeUpTime || syncingAlarm}
+            onClick={async () => {
+              setSyncingAlarm(true);
+              setAlarmStatus(await syncPhoneAlarm(wakeUpTime));
+              setSyncingAlarm(false);
+            }}
+            className="rounded-control border border-border dark:border-border-dark px-3 py-1.5 text-xs font-medium text-text-primary dark:text-text-primary-dark disabled:opacity-50"
+          >
+            {syncingAlarm ? 'Setting…' : 'Set alarm on this phone'}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-text-secondary dark:text-text-secondary-dark">
+          Sets a real ringing alarm in your phone&apos;s Clock app — it&apos;ll ring and bypass silent mode like any other alarm. Saving preferences below does this automatically whenever you change the time; use the button above to (re)send it without changing anything else, e.g. if you cleared the alarm on your phone. Leave blank for no wake-up alarm.
+        </p>
+        {alarmStatus && (
+          <p role="status" className="mt-1 text-xs text-text-secondary dark:text-text-secondary-dark">
+            {alarmStatus}
+          </p>
+        )}
+      </div>
 
       <div className="mb-3 flex items-center gap-3">
         <label className="text-xs text-text-secondary dark:text-text-secondary-dark">

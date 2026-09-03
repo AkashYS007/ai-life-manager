@@ -25,6 +25,16 @@ export class UpdateNotificationPreferencesInput {
   @Matches(HH_MM, { message: 'quietHoursEnd must be in 24-hour HH:mm format' })
   quietHoursEnd?: string;
 
+  // Wake-up alarm increment (2026-09-02). Deliberately its own field, not
+  // reused from quietHoursEnd — see schema.prisma's comment on
+  // User.wakeUpTime. Same undefined-vs-null convention as every other field
+  // here: a real GraphQL `null` explicitly clears a configured wake-up time
+  // back to "none set."
+  @Field({ nullable: true })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'wakeUpTime must be in 24-hour HH:mm format' })
+  wakeUpTime?: string;
+
   @Field({ nullable: true })
   @IsOptional()
   @IsBoolean()

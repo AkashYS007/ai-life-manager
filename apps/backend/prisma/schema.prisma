@@ -79,6 +79,20 @@ model User {
   // already use), null meaning "no quiet hours configured."
   quietHoursStart            String?  @map("quiet_hours_start")
   quietHoursEnd               String?  @map("quiet_hours_end")
+  // Wake-up alarm increment (2026-09-02): a separate preference from
+  // quietHoursEnd on purpose — quiet hours' own end time is "when
+  // notifications may resume," not necessarily the exact minute someone
+  // wants to actually get out of bed (e.g. quiet hours could end at 7am but
+  // a workout means waking at 6:30). Same HH:mm 24h local-time string
+  // convention as every other time-of-day field on this model; null means
+  // no wake-up alarm configured. This column only stores the *preference* —
+  // the real ringing alarm itself is a native OS alarm, handed off to the
+  // device's own Clock app from the frontend (see notifications/page.tsx
+  // and @capgo/capacitor-alarm), not anything this backend schedules or
+  // delivers itself, since Android/iOS don't let a background server push
+  // ring an alarm that bypasses silent mode/Do Not Disturb the way a real
+  // alarm clock does.
+  wakeUpTime                 String?  @map("wake_up_time")
   pushNotificationsEnabled    Boolean  @default(true) @map("push_notifications_enabled")
   emailNotificationsEnabled   Boolean  @default(false) @map("email_notifications_enabled")
   smsNotificationsEnabled     Boolean  @default(false) @map("sms_notifications_enabled")

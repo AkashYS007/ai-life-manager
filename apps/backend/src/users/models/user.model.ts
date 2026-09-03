@@ -54,6 +54,11 @@ export class User {
   @Field({ nullable: true })
   quietHoursEnd?: string;
 
+  // Wake-up alarm increment (2026-09-02) — see schema.prisma's comment on
+  // this same column for why it's a separate preference from quietHoursEnd.
+  @Field({ nullable: true })
+  wakeUpTime?: string;
+
   @Field()
   pushNotificationsEnabled!: boolean;
 

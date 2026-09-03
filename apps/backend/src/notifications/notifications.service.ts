@@ -397,6 +397,7 @@ export class NotificationsService {
       data: {
         quietHoursStart: input.quietHoursStart,
         quietHoursEnd: input.quietHoursEnd,
+        wakeUpTime: input.wakeUpTime,
         pushNotificationsEnabled: input.pushNotificationsEnabled,
         emailNotificationsEnabled: input.emailNotificationsEnabled,
         smsNotificationsEnabled: input.smsNotificationsEnabled,

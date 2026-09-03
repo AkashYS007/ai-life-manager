@@ -1671,6 +1671,7 @@ export const NOTIFICATION_PREFERENCES_QUERY = gql`
       id
       quietHoursStart
       quietHoursEnd
+      wakeUpTime
       pushNotificationsEnabled
       emailNotificationsEnabled
       smsNotificationsEnabled
@@ -1765,6 +1766,7 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
         id
         quietHoursStart
         quietHoursEnd
+        wakeUpTime
         pushNotificationsEnabled
         emailNotificationsEnabled
         smsNotificationsEnabled
