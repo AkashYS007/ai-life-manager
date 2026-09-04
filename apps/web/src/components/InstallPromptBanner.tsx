@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 // PWA install-prompt increment (2026-08-18). The app has had a correct
 // manifest, real icon set, and a working service worker for a while (see
@@ -66,6 +67,23 @@ export function InstallPromptBanner() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // Bug fix (2026-09-03, real-device report): this app's Android WebView
+    // is itself Chromium-based, so `beforeinstallprompt` can fire even
+    // while the real native (Capacitor) app is already running -- offering
+    // to "install" a browser PWA shortcut of an app the person is already
+    // inside of. Accepting that prompt creates a WebAPK (Android's
+    // mechanism for making a installed-PWA look and behave like a real
+    // installed app -- same icon, same name, its own Settings > Apps entry
+    // with Force stop/Uninstall/permissions) that is functionally
+    // indistinguishable from the real native app by icon or name alone,
+    // yet is still just Chrome underneath: no native FCM push, no native
+    // alarm access, none of what makes the real app work. A person can
+    // then easily tap the wrong one and land back on a plain website
+    // instead of the app, exactly what a real user hit and spent an entire
+    // support thread untangling before this fix. Bailing out here, before
+    // ever registering the listener, means the native app can never offer
+    // to install a decoy of itself again.
+    if (Capacitor.isNativePlatform()) return;
     if (isStandalone() || recentlyDismissed()) return;
 
     const isIOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
