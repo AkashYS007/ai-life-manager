@@ -30,11 +30,8 @@ const config: CapacitorConfig = {
           // it would boot straight out to the system browser (Chrome) on nearly
           // every real launch, even before a user tapped anything. Root cause:
           // Clerk (this app's auth provider) loads a hidden same-origin-looking
-          // iframe from its own Frontend API host (currently
-          // notable-skylark-91.clerk.accounts.dev — this is the *public*
-          // frontend-api host baked into NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, not a
-          // secret, safe to hardcode here) immediately on page load, to sync
-          // session state. Capacitor's Bridge.shouldOverrideUrlLoading (see
+          // iframe from its own Frontend API host immediately on page load, to
+          // sync session state. Capacitor's Bridge.shouldOverrideUrlLoading (see
           // node_modules/@capacitor/android/.../BridgeWebViewClient.java) does
           // NOT check WebResourceRequest#isForMainFrame() before deciding whether
           // a navigation is "external" — so that invisible iframe's cross-origin
@@ -48,11 +45,34 @@ const config: CapacitorConfig = {
           // bug was in how the *library* handles sub-frame navigation, not in any
           // code this repo owns. Listing the host here keeps Clerk's session-sync
           // iframe navigation inside the app's WebView instead of kicking it out.
-          // If Clerk's frontend-api host ever changes (e.g. a Clerk project
-          // reset, or moving to a custom Clerk domain), this needs updating to
-          // match — the current value can always be reconfirmed by checking
-          // `window.Clerk.frontendApi` on the live site.
-          allowNavigation: ['notable-skylark-91.clerk.accounts.dev'],
+          //
+          // Corrected (2026-09-04, real-device report: app working fine, then
+          // "after sometimes" bouncing out to the browser mid-session). This
+          // value was still the *Development* Clerk instance's frontend-api host
+          // (notable-skylark-91.clerk.accounts.dev) from when this fix was
+          // originally written -- Update 66 migrated this app from that
+          // Development instance to a Production instance on a first-party
+          // custom domain, but this one hardcoded reference was missed at the
+          // time and nobody had hit the resulting bug until now. The stale host
+          // being wrong didn't break the *background/sub-frame* case this
+          // allowlist exists for -- MainActivity.java's own shouldOverrideUrlLoading
+          // override (see apply_webview_navigation_fix.py) already keeps ANY
+          // sub-frame request in-WebView regardless of host or this list. What
+          // it broke instead: an actual real, top-level (main-frame) navigation
+          // Clerk's SDK can trigger against its own frontend-api host during
+          // normal use (e.g. a session refresh) -- that kind of navigation isn't
+          // covered by the sub-frame fix, so it fell through to Capacitor's
+          // normal external-host handling, which correctly checks this list and,
+          // finding the real production host missing from it, launched the
+          // system browser exactly as it would for a genuine external link.
+          // Confirmed the real current host directly off the live site
+          // (`Array.from(document.scripts).find(s =>
+          // s.src.includes('clerk')).src`) rather than assumed: clerk.genzylife.com.
+          // If Clerk's frontend-api host ever changes again (another project
+          // reset, another domain move), this needs updating to match — always
+          // reconfirm against the live site rather than assuming, the same way
+          // this correction was found.
+          allowNavigation: ['clerk.genzylife.com'],
     },
     android: {
           // The WebView's own back button should behave like a browser back
