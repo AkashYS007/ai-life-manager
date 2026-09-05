@@ -74,6 +74,7 @@ export const TODAY_PLAN_QUERY = gql`
         modelUsed
         generatedAt
         triggerEvent
+        autoApplyAt
         diff {
           summary
           changes {
@@ -561,6 +562,7 @@ export const LATEST_PLAN_RUN_QUERY = gql`
       modelUsed
       generatedAt
       triggerEvent
+      autoApplyAt
       diff {
         summary
         changes {
@@ -1677,6 +1679,7 @@ export const NOTIFICATION_PREFERENCES_QUERY = gql`
       smsNotificationsEnabled
       phoneNumber
       voiceNotificationsEnabled
+      autoApplyMorningPlanEnabled
     }
   }
 `;
@@ -1772,6 +1775,7 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
         smsNotificationsEnabled
         phoneNumber
         voiceNotificationsEnabled
+        autoApplyMorningPlanEnabled
       }
       errors {
         code

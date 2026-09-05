@@ -79,6 +79,40 @@ export function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): bo
   return aStart.getTime() < bEnd.getTime() && aEnd.getTime() > bStart.getTime();
 }
 
+// Morning plan auto-apply increment (2026-09-05): builds a real, spoken-
+// friendly rundown of what a plan actually changed, for the plan_ready
+// notification's body — see plan-generation.service.ts. Before this, that
+// body was a generic "A new day plan is ready to review." with no actual
+// schedule content, which made VoiceNotifications.tsx's title+body
+// narration (see that file) technically "speak the plan" while saying
+// nothing a person could act on by ear alone. Deliberately capped at 5
+// items even for a full WEEK plan — TTS reading out a dozen-plus items back
+// to back is more noise than signal; the notification's own in-app deep
+// link is still there for the full list. DAY scope omits the day-of-week
+// (every item is today, by definition); WEEK/MONTH include it, since
+// otherwise "Gym at 7:00 AM" is ambiguous across a multi-day plan.
+const SPOKEN_SUMMARY_MAX_ITEMS = 5;
+
+export function buildSpokenPlanSummary(
+  scope: 'DAY' | 'WEEK' | 'MONTH',
+  changes: Array<{ taskId: string; proposedStart: string }>,
+  taskTitleById: Map<string, string>,
+  timezone: string,
+): string | null {
+  if (changes.length === 0) return null;
+
+  const timeFormat = scope === 'DAY' ? 'h:mm a' : 'ccc h:mm a';
+  const items = changes.slice(0, SPOKEN_SUMMARY_MAX_ITEMS).map((c) => {
+    const title = taskTitleById.get(c.taskId) ?? 'a task';
+    const time = DateTime.fromJSDate(new Date(c.proposedStart), { zone: timezone }).toFormat(timeFormat);
+    return `${title} at ${time}`;
+  });
+
+  const remaining = changes.length - items.length;
+  const more = remaining > 0 ? `, and ${remaining} more` : '';
+  return `${items.join(', ')}${more}.`;
+}
+
 // Converts a habit's "HH:mm" preferredTime (a plain wall-clock string, no
 // date attached — see HabitsService's Habit.preferredTime docs) into a real
 // today-dated interval in the user's timezone, the same shape the policy

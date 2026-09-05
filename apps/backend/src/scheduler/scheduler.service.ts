@@ -11,6 +11,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CalendarAccountsService } from '../integrations/google/calendar-accounts.service';
 import { MicrosoftCalendarAccountsService } from '../integrations/microsoft/microsoft-calendar-accounts.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
+import { PlannerService } from '../planner/planner.service';
+import { MorningPlanService } from '../planner/morning-plan.service';
+import { PlanRunDecision } from '../planner/models/ai-plan-run.model';
 
 // Real-time calendar updates (webhooks) increment. Both providers cap how
 // long a channel/subscription lasts before it needs renewing (Google: ~7
@@ -88,6 +91,12 @@ interface ReminderSettings {
   reflectionHour: number;
   habitReminderMinOverdueMinutes: number;
   habitReminderMaxOverdueMinutes: number;
+  // Morning plan auto-apply increment (2026-09-05) — not a reminder in the
+  // "something's overdue" sense the other four fields are, but resolved
+  // here anyway so checkRemindersForUser has exactly one place to read
+  // every per-user "what should happen this morning" setting from, rather
+  // than a second, parallel resolution path just for this one field.
+  autoApplyMorningPlanEnabled: boolean;
 }
 
 // Same `?? default` resolution as apps/web/src/app/focus/page.tsx's own
@@ -101,6 +110,13 @@ function resolveReminderSettings(row: {
   reminderReflectionHour?: number | null;
   reminderHabitMinOverdueMinutes?: number | null;
   reminderHabitMaxOverdueMinutes?: number | null;
+  // Unlike the five fields above, this column is NOT NULL at the DB level
+  // (defaults to true — see schema.prisma) — always a real boolean once
+  // selected, never actually null/undefined in production. Typed optional
+  // and defaulted anyway so a caller that forgets to select it (there are
+  // none today, but this function has no way to enforce that) fails safe
+  // toward "on," matching the DB default, rather than silently toward "off."
+  autoApplyMorningPlanEnabled?: boolean | null;
 }): ReminderSettings {
   return {
     morningRoutineHour: row.reminderMorningRoutineHour ?? DEFAULT_MORNING_ROUTINE_HOUR,
@@ -110,6 +126,7 @@ function resolveReminderSettings(row: {
       row.reminderHabitMinOverdueMinutes ?? DEFAULT_HABIT_REMINDER_MIN_OVERDUE_MINUTES,
     habitReminderMaxOverdueMinutes:
       row.reminderHabitMaxOverdueMinutes ?? DEFAULT_HABIT_REMINDER_MAX_OVERDUE_MINUTES,
+    autoApplyMorningPlanEnabled: row.autoApplyMorningPlanEnabled ?? true,
   };
 }
 
@@ -176,6 +193,9 @@ export class SchedulerService {
     private readonly microsoftCalendarAccounts: MicrosoftCalendarAccountsService,
     // Automatic daily AI recommendations increment.
     private readonly recommendationsService: RecommendationsService,
+    // Morning plan auto-apply increment (2026-09-05).
+    private readonly morningPlanService: MorningPlanService,
+    private readonly plannerService: PlannerService,
   ) {}
 
   // Real-time calendar updates (webhooks) increment. Once a day is plenty
@@ -245,6 +265,8 @@ export class SchedulerService {
           reminderReflectionHour: true,
           reminderHabitMinOverdueMinutes: true,
           reminderHabitMaxOverdueMinutes: true,
+          // Morning plan auto-apply increment (2026-09-05).
+          autoApplyMorningPlanEnabled: true,
         },
       });
 
@@ -264,7 +286,56 @@ export class SchedulerService {
           this.logger.warn(`Reminder check failed for user ${user.id}: ${(error as Error).message}`);
         }
       }
+
+      // Morning plan auto-apply increment (2026-09-05): a second, unrelated
+      // sweep piggybacking on this same 15-minute lock/tick — checking "is
+      // any PROPOSED plan run past its own autoApplyAt yet" is a single
+      // cross-user query, not a per-user loop, so it doesn't belong inside
+      // the per-user try/catch above. Wrapped in its own try/catch so a
+      // failure here can never take down the per-user reminder sweep this
+      // tick already completed, and vice versa.
+      try {
+        await this.autoApplyDuePlanRuns();
+      } catch (error) {
+        this.logger.warn(`Auto-apply-due-plan-runs sweep failed: ${(error as Error).message}`);
+      }
     });
+  }
+
+  // Morning plan auto-apply increment (2026-09-05): the other half of
+  // MorningPlanService's contract — that service only ever sets
+  // AiPlanRun.autoApplyAt on a new plan; something still has to notice when
+  // that moment actually arrives and act on it. Public (not private) for
+  // the same "e2e tests can exercise this directly, without waiting on a
+  // real 15-minute cron tick or fighting every other test suite's own
+  // scheduler-lock rows" reasoning every other public method on this class
+  // already documents. Applying via PlannerService.respondToPlanRun (the
+  // exact same call the person's own Accept tap would make) rather than
+  // duplicating any of that method's real scheduling/conflict logic here —
+  // this sweep's only real job is deciding *when*, not *how*.
+  async autoApplyDuePlanRuns(): Promise<void> {
+    const due = await this.prisma.aiPlanRun.findMany({
+      where: { status: 'PROPOSED', autoApplyAt: { lte: new Date() } },
+      select: { id: true, userId: true },
+    });
+
+    for (const run of due) {
+      try {
+        await this.plannerService.respondToPlanRun(run.userId, run.id, PlanRunDecision.ACCEPT);
+      } catch (error) {
+        // ALREADY_RESPONDED is a normal, silent outcome — the person beat
+        // this sweep to reviewing it themselves in the time between this
+        // query and this specific call, same benign race NotificationsService's
+        // own create() lock exists to make harmless elsewhere. A genuinely
+        // unexpected failure (e.g. the user row vanished) is still logged,
+        // and either way one plan run's failure never blocks the rest of
+        // this sweep — same "isolate the failure, keep going" principle as
+        // every other best-effort loop in this file.
+        if ((error as Error).message !== 'ALREADY_RESPONDED') {
+          this.logger.warn(`Auto-apply failed for plan run ${run.id} (user ${run.userId}): ${(error as Error).message}`);
+        }
+      }
+    }
   }
 
   // Public (not private) specifically so this can be exercised directly for
@@ -317,6 +388,28 @@ export class SchedulerService {
         } catch (error) {
           this.logger.warn(`Auto recommendations generation failed for user ${userId}: ${(error as Error).message}`);
         }
+      }
+    }
+
+    // Morning plan auto-apply increment (2026-09-05): reuses this exact
+    // same "is it this person's local morning yet" window, same reasoning
+    // as the automatic daily recommendations job right above it — the start
+    // of the day (already configured, already the moment two other morning
+    // things fire) is the natural time for the day's (and, on Mondays, the
+    // week's) plan to regenerate and be narrated too. MorningPlanService
+    // owns its own "already done today/this week" de-dup, the same reason
+    // the recommendations check above needs its own existingRun guard: this
+    // window can span two 15-minute ticks, and a duplicate real Anthropic
+    // call for the exact same plan helps no one.
+    if (withinClockWindow(now, resolvedSettings.morningRoutineHour)) {
+      try {
+        await this.morningPlanService.maybeGenerateMorningPlans(
+          userId,
+          timezone,
+          resolvedSettings.autoApplyMorningPlanEnabled,
+        );
+      } catch (error) {
+        this.logger.warn(`Morning plan generation failed for user ${userId}: ${(error as Error).message}`);
       }
     }
 
@@ -459,6 +552,8 @@ export class SchedulerService {
         reminderReflectionHour: true,
         reminderHabitMinOverdueMinutes: true,
         reminderHabitMaxOverdueMinutes: true,
+        // Morning plan auto-apply increment (2026-09-05).
+        autoApplyMorningPlanEnabled: true,
       },
     });
     return resolveReminderSettings(user ?? {});

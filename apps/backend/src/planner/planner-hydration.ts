@@ -29,6 +29,8 @@ export async function hydratePlanRun(tasksService: TasksService, userId: string,
     modelUsed: record.modelUsed,
     generatedAt: record.generatedAt,
     respondedAt: record.respondedAt ?? undefined,
+    // Morning plan auto-apply increment (2026-09-05).
+    autoApplyAt: record.autoApplyAt ?? undefined,
     diff: {
       summary: diff.summary,
       changes: diff.changes

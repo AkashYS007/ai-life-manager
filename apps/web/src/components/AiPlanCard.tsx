@@ -32,7 +32,32 @@ interface PlanRun {
   // real GraphQL field before this increment; this component just never
   // asked for it.
   triggerEvent: string;
+  // Morning plan auto-apply increment (2026-09-05) — non-null and in the
+  // future means this plan is still PROPOSED and will auto-apply itself at
+  // this moment unless reviewed/changed first (see
+  // MorningPlanService/SchedulerService.autoApplyDuePlanRuns). Only ever
+  // set on a morning-triggered plan when the person's own
+  // autoApplyMorningPlanEnabled preference is on; every other plan
+  // (manual, or any other auto-replan trigger) always has this null.
+  autoApplyAt?: string | null;
   diff: { summary: string; changes: PlanChange[] };
+}
+
+// Morning plan auto-apply increment (2026-09-05): a real countdown, not
+// just "this will auto-apply eventually" — showing exactly when means the
+// person always knows how much time they actually have to look at a
+// morning-generated plan before it takes effect on its own, rather than
+// discovering after the fact that it already had.
+function formatAutoApplyNotice(autoApplyAt: string): string {
+  const target = new Date(autoApplyAt).getTime();
+  const minutesLeft = Math.round((target - Date.now()) / 60000);
+  const clockTime = new Date(autoApplyAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (minutesLeft <= 0) return 'Applying automatically any moment now, unless you make a change first.';
+  if (minutesLeft < 60) return `Auto-applies in ${minutesLeft} min (at ${clockTime}) unless you make a change first.`;
+  const hours = Math.floor(minutesLeft / 60);
+  const mins = minutesLeft % 60;
+  const hoursLabel = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `Auto-applies in ${hoursLabel} (at ${clockTime}) unless you make a change first.`;
 }
 
 // Every automatic trigger source in PlannerService (task.completed,
@@ -304,6 +329,11 @@ export function AiPlanCard({
             <p className="mt-1 text-xs text-text-secondary dark:text-text-secondary-dark">
               {latestPlanRun.diff.summary}
             </p>
+            {latestPlanRun.autoApplyAt && (
+              <p role="status" className="mt-1 text-xs font-medium text-accent dark:text-accent-dark">
+                {formatAutoApplyNotice(latestPlanRun.autoApplyAt)}
+              </p>
+            )}
           </div>
 
           {latestPlanRun.diff.changes.length > 0 && (

@@ -65,4 +65,11 @@ export class UpdateNotificationPreferencesInput {
   @IsOptional()
   @IsBoolean()
   voiceNotificationsEnabled?: boolean;
+
+  // Morning plan auto-apply increment (2026-09-05) — see schema.prisma's
+  // comment on User.autoApplyMorningPlanEnabled.
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsBoolean()
+  autoApplyMorningPlanEnabled?: boolean;
 }

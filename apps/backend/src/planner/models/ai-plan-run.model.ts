@@ -64,4 +64,12 @@ export class AiPlanRun {
 
   @Field({ nullable: true })
   respondedAt?: Date;
+
+  // Morning plan auto-apply increment (2026-09-05) — see schema.prisma's
+  // comment on this same column. Non-null and in the future means "still
+  // PROPOSED, will auto-apply at this time unless reviewed first"; the
+  // frontend uses this to show a real countdown/notice rather than letting
+  // an auto-apply happen with no warning.
+  @Field({ nullable: true })
+  autoApplyAt?: Date;
 }

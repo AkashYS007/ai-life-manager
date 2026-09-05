@@ -62,6 +62,24 @@ function formatDateTime(iso: string) {
   });
 }
 
+// Morning plan auto-apply increment (2026-09-05) — same notice/logic as
+// AiPlanCard's own formatAutoApplyNotice, deliberately duplicated here
+// rather than shared: these two components already don't share any state
+// or types (each tracks its own PlanRun query independently — see this
+// file's own top comment), and this is small and self-contained enough
+// that a shared import isn't worth the coupling.
+function formatAutoApplyNotice(autoApplyAt: string): string {
+  const target = new Date(autoApplyAt).getTime();
+  const minutesLeft = Math.round((target - Date.now()) / 60000);
+  const clockTime = new Date(autoApplyAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (minutesLeft <= 0) return 'Applying automatically any moment now, unless you make a change first.';
+  if (minutesLeft < 60) return `Auto-applies in ${minutesLeft} min (at ${clockTime}) unless you make a change first.`;
+  const hours = Math.floor(minutesLeft / 60);
+  const mins = minutesLeft % 60;
+  const hoursLabel = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `Auto-applies in ${hoursLabel} (at ${clockTime}) unless you make a change first.`;
+}
+
 // Weekly/monthly AI plan generation increment (PRD §7.4) — same propose/
 // accept/reject/edit shape as AiPlanCard (same requestReplan/
 // respondToPlanRun mutations, just with $scope set), but its own card since
@@ -278,6 +296,11 @@ export function WeeklyPlanCard({ openTasks = [] }: { openTasks?: OpenTask[] }) {
             </span>
           )}
           <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{planRun.diff.summary}</p>
+          {planRun.autoApplyAt && (
+            <p role="status" className="text-xs font-medium text-accent dark:text-accent-dark">
+              {formatAutoApplyNotice(planRun.autoApplyAt)}
+            </p>
+          )}
 
           {planRun.diff.changes.length > 0 && (
             <div className="flex flex-col gap-2">

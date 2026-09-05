@@ -403,6 +403,7 @@ export class NotificationsService {
         smsNotificationsEnabled: input.smsNotificationsEnabled,
         phoneNumber: input.phoneNumber,
         voiceNotificationsEnabled: input.voiceNotificationsEnabled,
+        autoApplyMorningPlanEnabled: input.autoApplyMorningPlanEnabled,
       },
       include: { subscription: true },
     });

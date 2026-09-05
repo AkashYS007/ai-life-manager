@@ -21,6 +21,7 @@ import {
   parseAiDateTime,
   overlaps,
   habitProtectedInterval,
+  buildSpokenPlanSummary,
 } from './planner-helpers';
 import { buildPrompt, SCOPE_WINDOW_DAYS } from './planner-prompt';
 import { hydratePlanRun } from './planner-hydration';
@@ -59,11 +60,21 @@ export class PlanGenerationService {
   // is completely unaffected; only the automatic-replan call site
   // (PlannerAutoReplanListener.maybeAutoReplan) ever passes a different
   // value.
+  // Morning plan auto-apply increment (2026-09-05): `autoApplyDelayMinutes`
+  // is a new, optional 5th parameter — every existing call site (the
+  // GraphQL resolver's manual "Generate plan" flow, and every
+  // PlannerAutoReplanListener event-driven trigger) omits it, so it
+  // defaults to `undefined` and this plan's `autoApplyAt` stays `null`,
+  // exactly today's "always wait for a real decision" behavior. Only
+  // MorningPlanService's daily/weekly scheduled trigger ever passes a real
+  // number here, and only when the user's own
+  // User.autoApplyMorningPlanEnabled preference is true — see that file.
   async requestReplan(
     userId: string,
     timezone: string,
     scope: PlanScope = PlanScope.DAY,
     triggerEvent: string = 'manual_request',
+    autoApplyDelayMinutes?: number,
   ): Promise<AiPlanRun> {
     const now = new Date();
     const { start: dayStart, end: dayEnd } = zonedDayBounds(now, timezone);
@@ -288,6 +299,8 @@ export class PlanGenerationService {
         scope: scope as any,
         diff: diff as any,
         modelUsed,
+        autoApplyAt:
+          autoApplyDelayMinutes != null ? new Date(now.getTime() + autoApplyDelayMinutes * 60 * 1000) : null,
       },
     });
 
@@ -300,9 +313,27 @@ export class PlanGenerationService {
     // a second.
     try {
       const scopeLabel = scope === PlanScope.DAY ? 'day' : scope === PlanScope.WEEK ? 'week' : 'month';
+      // Morning plan auto-apply increment (2026-09-05): the body used to be
+      // a generic "A new X plan is ready to review." with no actual
+      // schedule content — technically narrated by VoiceNotifications.tsx's
+      // title+body speech, but saying nothing a person could act on by ear
+      // alone. Now includes a real rundown of what changed, built from the
+      // exact same taskId->title data this method already has in scope
+      // (openTaskById) — no extra query needed. Falls back to the original
+      // generic sentence when there's genuinely nothing to summarize (every
+      // proposed change got dropped by the policy layer above).
+      const spokenSummary = buildSpokenPlanSummary(
+        scope,
+        validChanges.map((c) => ({ taskId: c.taskId, proposedStart: c.proposedStart })),
+        new Map(openTasks.map((t) => [t.id, t.title])),
+        timezone,
+      );
+      const scopeNoun = scope === PlanScope.DAY ? "Today's" : scope === PlanScope.WEEK ? "This week's" : "This month's";
+      const body = spokenSummary ? `${scopeNoun} plan: ${spokenSummary}` : `A new ${scopeLabel} plan is ready to review.`;
+
       await this.notificationsService.create(userId, timezone, 'plan_ready', {
         title: 'Your plan is ready',
-        body: `A new ${scopeLabel} plan is ready to review.`,
+        body,
         deeplink: '/today',
       });
     } catch (error) {

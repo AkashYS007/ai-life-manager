@@ -60,8 +60,12 @@ export class PlannerService {
     timezone: string,
     scope: PlanScope = PlanScope.DAY,
     triggerEvent: string = 'manual_request',
+    // Morning plan auto-apply increment (2026-09-05) — passed straight
+    // through to PlanGenerationService; see that file's own comment on this
+    // same parameter. Every pre-existing call site omits it, unaffected.
+    autoApplyDelayMinutes?: number,
   ): Promise<AiPlanRun> {
-    return this.planGeneration.requestReplan(userId, timezone, scope, triggerEvent);
+    return this.planGeneration.requestReplan(userId, timezone, scope, triggerEvent, autoApplyDelayMinutes);
   }
 
   // --- Automatic AI re-planning --------------------------------------------

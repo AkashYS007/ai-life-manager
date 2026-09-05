@@ -13,6 +13,7 @@ import { PlannerResolver } from './planner.resolver';
 import { PlanGenerationService } from './plan-generation.service';
 import { PlanResponseService } from './plan-response.service';
 import { PlannerAutoReplanListener } from './plan-auto-replan.listener';
+import { MorningPlanService } from './morning-plan.service';
 
 @Module({
   imports: [
@@ -37,13 +38,17 @@ import { PlannerAutoReplanListener } from './plan-auto-replan.listener';
     PlanGenerationService,
     PlanResponseService,
     PlannerAutoReplanListener,
+    MorningPlanService,
   ],
   // AnthropicClient is exported (not just PlannerService) so ChatModule can
   // import this module and share the exact same singleton instance/token,
   // rather than each module registering its own independent copy — that
   // matters for e2e tests, where overriding AnthropicClient with a fake
   // needs to unambiguously replace the one true provider everywhere it's
-  // injected, not just wherever Nest happens to resolve first.
-  exports: [PlannerService, AnthropicClient],
+  // injected, not just wherever Nest happens to resolve first. MorningPlanService
+  // is exported (Morning plan auto-apply increment, 2026-09-05) so
+  // SchedulerModule can inject it the same way, without SchedulerModule
+  // needing PlanGenerationService/PlanResponseService directly.
+  exports: [PlannerService, AnthropicClient, MorningPlanService],
 })
 export class PlannerModule {}

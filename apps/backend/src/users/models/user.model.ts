@@ -76,6 +76,11 @@ export class User {
   @Field()
   voiceNotificationsEnabled!: boolean;
 
+  // Morning plan auto-apply increment (2026-09-05) — see schema.prisma's
+  // comment on this same column.
+  @Field()
+  autoApplyMorningPlanEnabled!: boolean;
+
   // Diagnostic onboarding increment — see schema.prisma's comment on these
   // same columns for why they live directly on User (mirrors quietHoursStart/
   // End's own precedent) rather than a dedicated onboarding-answers table.

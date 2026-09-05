@@ -160,6 +160,10 @@ function PreferencesForm() {
   // notifications were unconditionally on for everyone before this control
   // existed at all.
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  // Morning plan auto-apply increment (2026-09-05) — defaults to `true`,
+  // matching the field's own DB default (see schema.prisma), since this is
+  // a brand-new feature with no pre-existing behavior to preserve.
+  const [autoApplyMorningPlanEnabled, setAutoApplyMorningPlanEnabled] = useState(true);
   const [initialized, setInitialized] = useState(false);
   // Fix (frontend audit, 2026-08-25): matches the same fix on
   // settings/page.tsx (see its own comment for the full reasoning) — this
@@ -184,6 +188,7 @@ function PreferencesForm() {
     setSmsEnabled(data.me.smsNotificationsEnabled);
     setPhoneNumber(data.me.phoneNumber ?? '');
     setVoiceEnabled(data.me.voiceNotificationsEnabled);
+    setAutoApplyMorningPlanEnabled(data.me.autoApplyMorningPlanEnabled);
     setInitialized(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.me, dirty]);
@@ -212,6 +217,7 @@ function PreferencesForm() {
             smsNotificationsEnabled: smsEnabled,
             phoneNumber: trimmedPhone || null,
             voiceNotificationsEnabled: voiceEnabled,
+            autoApplyMorningPlanEnabled,
           },
         },
       });
@@ -352,6 +358,30 @@ function PreferencesForm() {
           <input type="checkbox" checked={voiceEnabled} onChange={(e) => { setDirty(true); setVoiceEnabled(e.target.checked); }} />
           Read notifications aloud (voice)
         </label>
+      </div>
+
+      {/* Morning plan auto-apply increment (2026-09-05, explicit user
+          request): every morning (and, for the week plan, every Monday
+          morning) your day/week plan is now generated and narrated aloud
+          automatically, whether or not this is on — this toggle only
+          controls what happens after that. On (the default): the plan
+          quietly applies itself to your real tasks a short while later
+          (1 hour for the day plan, 3 hours for the week plan) unless you've
+          reviewed and changed it by then. Off: it still gets generated and
+          read to you every morning, but just sits there waiting for you to
+          accept/edit/reject it yourself, like any other plan. */}
+      <div className="mb-3">
+        <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark">
+          <input
+            type="checkbox"
+            checked={autoApplyMorningPlanEnabled}
+            onChange={(e) => { setDirty(true); setAutoApplyMorningPlanEnabled(e.target.checked); }}
+          />
+          Auto-apply my morning plan if I don&apos;t review it
+        </label>
+        <p className="mt-1 text-xs text-text-secondary dark:text-text-secondary-dark">
+          Your day plan is generated and read aloud each morning (and your week plan every Monday). With this on, it applies itself automatically a little while later unless you make a change first — see the plan card on Today/the weekly planner for exactly when.
+        </p>
       </div>
 
       {/* SMS delivery increment: smsNotificationsEnabled has existed since
